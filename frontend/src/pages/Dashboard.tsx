@@ -12,8 +12,8 @@ import {
   getContractBalance,
   withdrawCommission,
   emergencyWithdrawAll,
+  signAuthMessage,
 } from '../utils/contract';
-import { signAuthMessage } from '../utils/contract';
 import { showSuccessToast, showErrorToast } from '../utils/notification';
 import { config } from '../config';
 import { api, getDashboardData, upsertUserFromChain } from '../services/api';
@@ -82,13 +82,15 @@ const styles = {
   container: {
     maxWidth: 1200,
     margin: '0 auto',
-    padding: '26px 18px 48px',
+    padding: '20px 14px 40px',
   },
   topBar: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 18,
+    gap: 12,
+    marginBottom: 16,
+    flexWrap: 'wrap' as const,
   },
   brand: {
     fontWeight: 900,
@@ -120,29 +122,33 @@ const styles = {
   },
   grid: {
     display: 'grid',
-    gridTemplateColumns: '1fr 1fr',
-    gap: 18,
+    gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+    gap: 14,
+    alignItems: 'stretch',
   },
   card: {
     background: 'rgba(255,255,255,0.6)',
     border: `1px solid ${colors.grayLine}`,
     borderRadius: 16,
-    padding: 18,
+    padding: 16,
     minHeight: 160,
     boxShadow: '0 12px 24px rgba(11,27,59,0.06)',
+    display: 'flex',
+    flexDirection: 'column' as const,
+    gap: 10,
   },
   cardTall: {
     minHeight: 220,
   },
   cardTitle: {
-    margin: '0 0 8px 0',
+    margin: '0 0 6px 0',
     fontSize: 16,
     fontWeight: 900,
   },
   statRow: {
     display: 'grid',
-    gridTemplateColumns: '1fr 1fr',
-    gap: 12,
+    gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+    gap: 10,
   },
   statBox: {
     background: 'rgba(255,255,255,0.7)',
@@ -156,13 +162,13 @@ const styles = {
     color: colors.navySoft,
   },
   statValue: {
-    fontSize: 24,
+    fontSize: 22,
     fontWeight: 900,
   },
   balance: {
-    fontSize: 32,
+    fontSize: 28,
     fontWeight: 900,
-    margin: '8px 0 8px',
+    margin: '6px 0 6px',
   },
   button: {
     height: 44,
@@ -201,6 +207,7 @@ const styles = {
     display: 'flex',
     gap: 10,
     flexWrap: 'wrap' as const,
+    width: '100%',
   },
   input: {
     height: 44,
@@ -211,6 +218,7 @@ const styles = {
     outline: 'none',
     color: colors.deepNavy,
     fontSize: 14,
+    width: '100%',
   },
   copyWrap: {
     display: 'grid',
@@ -223,16 +231,19 @@ const styles = {
     gap: 12,
     overflowX: 'auto' as const,
     paddingBottom: 6,
+    scrollSnapType: 'x mandatory',
+    WebkitOverflowScrolling: 'touch',
   },
   noticeCard: {
     minWidth: 280,
-    maxWidth: 320,
+    maxWidth: 360,
     background: 'rgba(255,255,255,0.85)',
     border: `1px solid ${colors.grayLine}`,
     borderRadius: 14,
     padding: 12,
     flex: '0 0 auto',
     cursor: 'pointer',
+    scrollSnapAlign: 'start',
   },
   noticeImg: {
     width: '100%',
@@ -245,10 +256,10 @@ const styles = {
   small: { fontSize: 12, color: colors.navySoft },
   muted: { opacity: 0.8 },
   adminPanel: {
-    marginTop: 12,
+    marginTop: 6,
     display: 'grid',
     gridTemplateColumns: '1fr',
-    gap: 12,
+    gap: 10,
   },
   textarea: {
     minHeight: 120,
@@ -260,17 +271,27 @@ const styles = {
     background: colors.white,
     color: colors.deepNavy,
     outline: 'none',
+    width: '100%',
   },
   divider: {
     height: 1,
     background: colors.grayLine,
-    margin: '10px 0',
-  },
-  // Responsive
-  '@media (max-width: 980px)': {
-    grid: { gridTemplateColumns: '1fr' },
+    margin: '8px 0',
   },
 } satisfies Record<string, React.CSSProperties | any>;
+
+// Hook: detect mobile viewport
+const useIsMobile = (bp = 768) => {
+  const [isMobile, setIsMobile] = useState<boolean>(() =>
+    typeof window !== 'undefined' ? window.innerWidth < bp : false
+  );
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < bp);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, [bp]);
+  return isMobile;
+};
 
 // Execute script tags inside dynamic HTML content (admin notices)
 const DangerousHtml: React.FC<{ html: string }> = ({ html }) => {
@@ -284,7 +305,6 @@ const DangerousHtml: React.FC<{ html: string }> = ({ html }) => {
     const scripts = Array.from(ref.current.querySelectorAll('script'));
     scripts.forEach((oldScript) => {
       const s = document.createElement('script');
-      // Copy attributes
       for (const { name, value } of Array.from(oldScript.attributes)) {
         s.setAttribute(name, value);
       }
@@ -297,6 +317,7 @@ const DangerousHtml: React.FC<{ html: string }> = ({ html }) => {
 };
 
 const Dashboard: React.FC = () => {
+  const isMobile = useIsMobile();
   const { account, userId, disconnect } = useWallet();
   const queryClient = useQueryClient();
   const [isProcessing, setIsProcessing] = useState(false);
@@ -512,8 +533,6 @@ Timestamp: ${ts}`;
       });
       const totalUsers = data?.totals?.total_registered_users ?? 0;
       const contractBalRaw = data?.totals?.contract_balance_raw ?? '0';
-      // backend balance is raw wei-like in USDT decimals; front already formats getContractBalance(),
-      // but here we show quick divider by assuming USDT decimals same as config.usdtDecimals
       const decimals = Number((config as any).usdtDecimals ?? 18);
       const pretty = Number(ethers.formatUnits(contractBalRaw, decimals)).toFixed(2);
       setAdminOverview({ total_users: totalUsers, contract_balance: pretty });
@@ -526,6 +545,11 @@ Timestamp: ${ts}`;
 
   const initials = (referralCode || 'U').slice(0, 2).toUpperCase();
 
+  // Dynamic styles for mobile
+  const btnFull = isMobile ? { width: '100%' } : {};
+  const copyGrid = isMobile ? { gridTemplateColumns: '1fr' } : {};
+  const noticeCardSize = isMobile ? { minWidth: '86%', maxWidth: '86%' } : {};
+
   return (
     <div style={styles.page}>
       <div style={styles.container}>
@@ -533,7 +557,9 @@ Timestamp: ${ts}`;
           <div style={styles.brand}>Web3 Community</div>
           <div style={styles.userBox}>
             <div style={styles.avatar}>{initials}</div>
-            <button style={styles.logoutBtn} onClick={() => { disconnect(); }}>Logout</button>
+            <button style={{ ...styles.logoutBtn, ...(isMobile ? { width: 100 } : {}) }} onClick={() => { disconnect(); }}>
+              Logout
+            </button>
           </div>
         </div>
 
@@ -542,38 +568,38 @@ Timestamp: ${ts}`;
           <div style={{ ...styles.card, ...styles.cardTall }}>
             <h3 style={styles.cardTitle}>Available Balance</h3>
             {isOnChainLoading ? (
-              <div className="skeleton" style={{ height: 32, background: '#eef2f6', borderRadius: 8 }} />
+              <div style={{ height: 28, background: '#eef2f6', borderRadius: 8 }} />
             ) : (
-              <div className="money" style={styles.balance}>${safeMoney(onChainData?.userBalance)}</div>
+              <div style={styles.balance}>${safeMoney(onChainData?.userBalance)}</div>
             )}
             <div style={styles.row}>
               <button
-                style={styles.button}
+                style={{ ...styles.button, ...btnFull }}
                 disabled={isProcessing || isOnChainLoading}
                 onClick={onChainData?.role === 'user' ? handleUserPayout : handleAdminPayout}
               >
                 {onChainData?.role === 'user' ? 'Payout' : 'Withdraw Commission'}
               </button>
-              <button style={styles.buttonGhost} disabled={isOnChainLoading} onClick={() => refetchOnChain()}>
+              <button style={{ ...styles.buttonGhost, ...btnFull }} disabled={isOnChainLoading} onClick={() => refetchOnChain()}>
                 Refresh On‑chain
               </button>
-              <button style={styles.buttonGhost} disabled={isOffChainLoading} onClick={() => refetchOffChain()}>
+              <button style={{ ...styles.buttonGhost, ...btnFull }} disabled={isOffChainLoading} onClick={() => refetchOffChain()}>
                 Refresh Data
               </button>
             </div>
             {!isOnChainLoading && !onChainData?.hasFundCode && (
-              <div style={{ ...styles.small, color: colors.danger, marginTop: 8 }}>
+              <div style={{ ...styles.small, color: colors.danger, marginTop: 6 }}>
                 Fund code not set. You must register with a fund code to withdraw.
               </div>
             )}
             {onChainData?.role !== 'user' && (
-              <div style={{ marginTop: 10, ...styles.small }}>
+              <div style={{ marginTop: 8, ...styles.small }}>
                 Contract Balance: <strong>${safeMoney(onChainData?.contractBalance)}</strong> • Your Commission: <strong>${safeMoney(onChainData?.adminCommission)}</strong>
               </div>
             )}
             {onChainData?.role === 'owner' && (
-              <div style={{ marginTop: 10 }}>
-                <button style={styles.buttonDanger} disabled={isProcessing} onClick={handleEmergencyWithdraw}>
+              <div style={{ marginTop: 8 }}>
+                <button style={{ ...styles.buttonDanger, ...btnFull }} disabled={isProcessing} onClick={handleEmergencyWithdraw}>
                   Emergency Withdraw All
                 </button>
               </div>
@@ -597,11 +623,11 @@ Timestamp: ${ts}`;
                 </div>
               </div>
             </div>
-            <div style={{ ...styles.row, marginTop: 12 }}>
-              <button style={styles.button} disabled={isProcessing || !account} onClick={handleMarkTodayLogin}>
+            <div style={{ ...styles.row, marginTop: 10 }}>
+              <button style={{ ...styles.button, ...btnFull }} disabled={isProcessing || !account} onClick={handleMarkTodayLogin}>
                 Mark Today’s Login
               </button>
-              <button style={styles.buttonGhost} disabled={isProcessing || !account} onClick={handleSyncFromChain}>
+              <button style={{ ...styles.buttonGhost, ...btnFull }} disabled={isProcessing || !account} onClick={handleSyncFromChain}>
                 Sync Account (from chain)
               </button>
             </div>
@@ -609,7 +635,7 @@ Timestamp: ${ts}`;
               <>
                 <div style={styles.divider} />
                 <div style={styles.small}>
-                  Commission estimate per network size — L1: {offChainData.commissions.percentages.l1}%, L2: {offChainData.commissions.percentages.l2}%, L3: {offChainData.commissions.percentages.l3}% (based on current fee)
+                  Commission estimate — L1: {offChainData.commissions.percentages.l1}% • L2: {offChainData.commissions.percentages.l2}% • L3: {offChainData.commissions.percentages.l3}%
                 </div>
               </>
             )}
@@ -622,7 +648,7 @@ Timestamp: ${ts}`;
               {(offChainData?.notices ?? []).map((n) => (
                 <div
                   key={n.id}
-                  style={styles.noticeCard}
+                  style={{ ...styles.noticeCard, ...noticeCardSize }}
                   onClick={() => {
                     if (n.link_url) window.open(n.link_url, '_blank');
                   }}
@@ -635,7 +661,6 @@ Timestamp: ${ts}`;
                   )}
                   <div style={{ fontWeight: 900, marginBottom: 6 }}>{n.title}</div>
                   <div style={{ ...styles.small, ...styles.muted, marginBottom: 6 }}>{new Date(n.created_at).toLocaleString()}</div>
-                  {/* Render HTML (including script execution) */}
                   <div style={{ fontSize: 13, color: colors.navySoft, maxHeight: 120, overflow: 'auto' }}>
                     <DangerousHtml html={n.content_html} />
                   </div>
@@ -652,16 +677,16 @@ Timestamp: ${ts}`;
             <h3 style={styles.cardTitle}>Share & Earn</h3>
             <div style={{ marginBottom: 10 }}>
               <div style={{ ...styles.small, marginBottom: 6 }}>Referral Code</div>
-              <div style={styles.copyWrap as any}>
+              <div style={{ ...(styles.copyWrap as any), ...(copyGrid as any) }}>
                 <input style={styles.input} readOnly value={referralCode || ''} />
-                <button style={styles.button} onClick={() => copyToClipboard(referralCode)}>Copy</button>
+                <button style={{ ...styles.button, ...btnFull }} onClick={() => copyToClipboard(referralCode)}>Copy</button>
               </div>
             </div>
             <div>
               <div style={{ ...styles.small, marginBottom: 6 }}>Referral Link</div>
-              <div style={styles.copyWrap as any}>
+              <div style={{ ...(styles.copyWrap as any), ...(copyGrid as any) }}>
                 <input style={styles.input} readOnly value={referralLink} />
-                <button style={styles.button} onClick={() => copyToClipboard(referralLink)}>Copy</button>
+                <button style={{ ...styles.button, ...btnFull }} onClick={() => copyToClipboard(referralLink)}>Copy</button>
               </div>
             </div>
           </div>
@@ -673,7 +698,7 @@ Timestamp: ${ts}`;
 
               <div style={styles.adminPanel as any}>
                 <div style={styles.row}>
-                  <button style={styles.buttonGhost} onClick={handleLoadAdminOverview} disabled={isProcessing}>
+                  <button style={{ ...styles.buttonGhost, ...btnFull }} onClick={handleLoadAdminOverview} disabled={isProcessing}>
                     Load Overview
                   </button>
                   <span style={{ ...styles.small, alignSelf: 'center' }}>
@@ -686,7 +711,7 @@ Timestamp: ${ts}`;
                 <div style={styles.divider} />
 
                 <div style={styles.row}>
-                  <div style={{ flex: 1 }}>
+                  <div style={{ flex: 1, minWidth: 220 }}>
                     <div style={{ ...styles.small, marginBottom: 6 }}>Title</div>
                     <input
                       style={styles.input}
@@ -695,7 +720,7 @@ Timestamp: ${ts}`;
                       placeholder="Enter title"
                     />
                   </div>
-                  <div style={{ width: 120 }}>
+                  <div style={{ width: 140, minWidth: 120 }}>
                     <div style={{ ...styles.small, marginBottom: 6 }}>Priority</div>
                     <input
                       type="number"
@@ -708,7 +733,7 @@ Timestamp: ${ts}`;
                 </div>
 
                 <div style={styles.row}>
-                  <div style={{ flex: 1 }}>
+                  <div style={{ flex: 1, minWidth: 220 }}>
                     <div style={{ ...styles.small, marginBottom: 6 }}>Image URL (optional)</div>
                     <input
                       style={styles.input}
@@ -717,7 +742,7 @@ Timestamp: ${ts}`;
                       placeholder="https://..."
                     />
                   </div>
-                  <div style={{ flex: 1 }}>
+                  <div style={{ flex: 1, minWidth: 220 }}>
                     <div style={{ ...styles.small, marginBottom: 6 }}>Link URL (optional)</div>
                     <input
                       style={styles.input}
@@ -740,7 +765,7 @@ Timestamp: ${ts}`;
                   />
                 </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
                     <input
                       type="checkbox"
@@ -749,7 +774,7 @@ Timestamp: ${ts}`;
                     />
                     Active
                   </label>
-                  <button style={styles.button} onClick={handleCreateNotice} disabled={isProcessing}>
+                  <button style={{ ...styles.button, ...btnFull }} onClick={handleCreateNotice} disabled={isProcessing}>
                     Post Notice
                   </button>
                 </div>
