@@ -13,6 +13,7 @@ import {
 type Bindings = {
   DB: D1Database;
   ALLOWED_ORIGINS: string;
+  // RPC + contract config
   BSC_RPC_URL?: string;
   CONTRACT_ADDRESS: string;
   START_BLOCK?: string;
@@ -22,9 +23,9 @@ const app = new Hono<{ Bindings: Bindings }>();
 
 // ---------- CORS ----------
 app.use('/*', async (c, next) => {
-  const allowedOrigins = c.env.ALLOWED_ORIGINS ? c.env.ALLOWED_ORIGINS.split(',') : [];
+  const allowed = c.env.ALLOWED_ORIGINS ? c.env.ALLOWED_ORIGINS.split(',') : [];
   return await cors({
-    origin: (origin) => (allowedOrigins.includes(origin) ? origin : allowedOrigins[0] || ''),
+    origin: (origin) => (allowed.includes(origin) ? origin : allowed[0] || ''),
   })(c, next);
 });
 
@@ -53,6 +54,7 @@ async function ensureSchema(db: D1Database) {
       content_html TEXT,
       image_url TEXT,
       link_url TEXT,
+      kind TEXT DEFAULT 'text',
       is_active INTEGER DEFAULT 1,
       priority INTEGER DEFAULT 0,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -65,8 +67,25 @@ async function ensureSchema(db: D1Database) {
       fields_json TEXT NOT NULL,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     )`,
+    // optional: miners table (if you want dedicated table later)
+    `CREATE TABLE IF NOT EXISTS miners (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      wallet_address TEXT NOT NULL,
+      amount_raw TEXT NOT NULL,
+      start_time INTEGER,
+      end_time INTEGER,
+      tx_hash TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )`,
   ];
   await db.batch(stmts.map((sql) => db.prepare(sql)));
+
+  // Try to add 'kind' to existing notices if it's missing (ignore errors)
+  try {
+    await db.prepare(`ALTER TABLE notices ADD COLUMN kind TEXT DEFAULT 'text'`).run();
+  } catch (_) {
+    // ignore if exists
+  }
 }
 
 app.use('*', async (c, next) => {
@@ -74,7 +93,7 @@ app.use('*', async (c, next) => {
   await next();
 });
 
-// ---------- Contract ABI ----------
+// ---------- Contract ABI (CommunityPlatform minimal) ----------
 const PLATFORM_ABI = [
   'function isRegistered(address) view returns (bool)',
   'function addressToUserId(address) view returns (string)',
@@ -83,19 +102,15 @@ const PLATFORM_ABI = [
   'function userBalances(address) view returns (uint256)',
   'function registrationFee() view returns (uint256)',
   'function owner() view returns (address)',
-  'function usdtToken() view returns (address)',
   'function getContractBalance() view returns (uint256)',
   'event UserRegistered(address indexed user, string userId, address indexed referrer)',
-];
-
-const ERC20_ABI = [
-  'function decimals() view returns (uint8)',
+  'event MinerPurchased(address indexed user, uint256 amount, uint256 startTime, uint256 endTime)',
 ];
 
 const iface = new Interface(PLATFORM_ABI);
 const USER_REGISTERED_TOPIC0 = ethers.id('UserRegistered(address,string,address)');
+// const MINER_PURCHASED_TOPIC0 = ethers.id('MinerPurchased(address,uint256,uint256,uint256)');
 
-// ---------- Utils: provider/contract ----------
 function getProvider(env: Bindings): JsonRpcProvider {
   const url = env.BSC_RPC_URL;
   if (!url) throw new Error('BSC_RPC_URL is not configured');
@@ -154,15 +169,11 @@ async function getRegistrationLogForUser(env: Bindings, address: string) {
   const block = await provider.getBlock(lg.blockNumber);
   let userIdFromEvent: string | undefined;
   let referrerFromEvent: string | undefined;
-
   try {
     const parsed = iface.parseLog(lg);
     userIdFromEvent = parsed?.args?.userId;
     referrerFromEvent = parsed?.args?.referrer;
-  } catch {
-    // ignore parse failures
-  }
-
+  } catch {}
   return {
     txHash: lg.transactionHash,
     blockNumber: lg.blockNumber,
@@ -210,7 +221,6 @@ async function readUserFromChain(env: Bindings, addr: string) {
   };
 }
 
-// ---------- DB helpers ----------
 async function getDbUserByAddress(db: D1Database, lowerAddr: string) {
   return db.prepare('SELECT user_id, referrer_id, registration_tx_hash FROM users WHERE wallet_address = ?')
     .bind(lowerAddr)
@@ -269,6 +279,9 @@ async function ensureDynamicFormTable(db: D1Database, key: string) {
 }
 
 // ---------- API Routes ----------
+
+// Health check
+app.get('/api/health', (c) => c.json({ ok: true, time: Date.now() }));
 
 // Bootstrap user status (chain + db)
 app.get('/api/users/:address', async (c) => {
@@ -396,27 +409,29 @@ app.get('/api/dashboard/:walletAddress', async (c) => {
 
     const userId = user.user_id;
 
-    const level1Referrals = await db.prepare('SELECT user_id FROM users WHERE referrer_id = ?')
+    // Level 1 referrals
+    const level1 = await db.prepare('SELECT user_id FROM users WHERE referrer_id = ? ORDER BY created_at DESC')
       .bind(userId)
       .all<{ user_id: string }>();
-    const level1Ids = level1Referrals.results?.map(u => u.user_id) || [];
+    const level1Ids = (level1.results || []).map(u => u.user_id);
     const level1Count = level1Ids.length;
 
+    // Level 2
     let level2Ids: string[] = [];
-    let level2Count = 0;
     if (level1Ids.length > 0) {
       const placeholders = level1Ids.map(() => '?').join(',');
       const level2Rows = await db.prepare(`SELECT user_id FROM users WHERE referrer_id IN (${placeholders})`)
         .bind(...level1Ids)
         .all<{ user_id: string }>();
-      level2Ids = level2Rows.results?.map(u => u.user_id) || [];
-      level2Count = level2Ids.length;
+      level2Ids = (level2Rows.results || []).map(u => u.user_id);
     }
+    const level2Count = level2Ids.length;
 
+    // Level 3
     let level3Count = 0;
     if (level2Ids.length > 0) {
-      const placeholdersL2 = level2Ids.map(() => '?').join(',');
-      const level3Rows = await db.prepare(`SELECT COUNT(*) as count FROM users WHERE referrer_id IN (${placeholdersL2})`)
+      const placeholders = level2Ids.map(() => '?').join(',');
+      const level3Rows = await db.prepare(`SELECT COUNT(*) as count FROM users WHERE referrer_id IN (${placeholders})`)
         .bind(...level2Ids)
         .first<{ count: number }>();
       level3Count = level3Rows?.count || 0;
@@ -442,8 +457,29 @@ app.get('/api/dashboard/:walletAddress', async (c) => {
 
     // Notices (active, top 10)
     const noticesRes = await db.prepare(
-      'SELECT id, title, content_html, image_url, link_url, priority, created_at FROM notices WHERE is_active = 1 ORDER BY priority DESC, id DESC LIMIT 10'
-    ).all<{ id: number; title: string; content_html: string; image_url: string; link_url: string; priority: number; created_at: string }>();
+      'SELECT id, title, content_html, image_url, link_url, kind, priority, created_at FROM notices WHERE is_active = 1 ORDER BY priority DESC, id DESC LIMIT 10'
+    ).all<{ id: number; title: string; content_html: string; image_url: string; link_url: string; kind: string; priority: number; created_at: string }>();
+
+    // Mining stats off-chain from form_mining (dynamic table)
+    let minerCount = 0;
+    let totalDeposited = 0;
+    try {
+      const res = await db.prepare('SELECT fields_json FROM form_mining WHERE wallet_address = ?')
+        .bind(lower)
+        .all<{ fields_json: string }>();
+      for (const row of (res.results || [])) {
+        try {
+          const obj = JSON.parse(row.fields_json || '{}');
+          const amt = Number(obj?.amount_usdt || 0);
+          if (!isNaN(amt) && amt > 0) {
+            minerCount += 1;
+            totalDeposited += amt;
+          }
+        } catch {}
+      }
+    } catch {
+      // table may not exist yet
+    }
 
     return c.json({
       userId,
@@ -453,6 +489,7 @@ app.get('/api/dashboard/:walletAddress', async (c) => {
         level2_count: level2Count,
         level3_count: level3Count,
       },
+      level1_list: level1Ids, // for frontend referral list fallback
       logins: {
         total_login_days: totalLoginDays,
       },
@@ -470,14 +507,45 @@ app.get('/api/dashboard/:walletAddress', async (c) => {
         content_html: n.content_html,
         image_url: n.image_url,
         link_url: n.link_url,
+        kind: n.kind || 'text',
         priority: n.priority,
         created_at: n.created_at,
       })),
-      earningHistory: [], // replace mock with real in future if needed
+      miningStats: {
+        miner_count: minerCount,
+        total_deposited: totalDeposited, // USDT (number)
+      },
+      earningHistory: [],
     });
   } catch (e: any) {
     console.error('Dashboard data error:', e.stack || e.message);
     return c.json({ error: 'Server error fetching dashboard data' }, 500);
+  }
+});
+
+// ---------- Referrals (Level-1 list) ----------
+app.get('/api/referrals/:walletAddress', async (c) => {
+  try {
+    const { walletAddress } = c.req.param();
+    if (!ethers.isAddress(walletAddress)) return c.json({ error: 'Invalid wallet address' }, 400);
+
+    const lower = walletAddress.toLowerCase();
+    const db = c.env.DB;
+
+    const user = await db.prepare('SELECT user_id FROM users WHERE wallet_address = ?')
+      .bind(lower)
+      .first<{ user_id: string }>();
+    if (!user) return c.json({ list: [] });
+
+    const level1 = await db.prepare('SELECT user_id FROM users WHERE referrer_id = ? ORDER BY created_at DESC')
+      .bind(user.user_id)
+      .all<{ user_id: string }>();
+
+    const list = (level1.results || []).map(r => r.user_id);
+    return c.json({ list });
+  } catch (e: any) {
+    console.error('GET /api/referrals/:walletAddress error:', e.stack || e.message);
+    return c.json({ list: [] });
   }
 });
 
@@ -489,7 +557,7 @@ app.get('/api/notices', async (c) => {
     const onlyActive = url.searchParams.get('active') !== '0';
 
     const where = onlyActive ? 'WHERE is_active = 1' : '';
-    const stmt = `SELECT id, title, content_html, image_url, link_url, priority, created_at FROM notices ${where} ORDER BY priority DESC, id DESC LIMIT ?`;
+    const stmt = `SELECT id, title, content_html, image_url, link_url, kind, priority, created_at FROM notices ${where} ORDER BY priority DESC, id DESC LIMIT ?`;
     const res = await c.env.DB.prepare(stmt).bind(limit).all();
 
     return c.json({
@@ -499,6 +567,7 @@ app.get('/api/notices', async (c) => {
         content_html: n.content_html,
         image_url: n.image_url,
         link_url: n.link_url,
+        kind: n.kind || 'text',
         priority: n.priority,
         created_at: n.created_at,
       })),
@@ -522,6 +591,7 @@ app.post('/api/notices', async (c) => {
       link_url?: string;
       is_active?: boolean;
       priority?: number;
+      kind?: 'image' | 'text' | 'script';
     }>();
 
     const { address, timestamp, signature } = body || ({} as any);
@@ -535,17 +605,25 @@ app.post('/api/notices', async (c) => {
     await requireOwner(c.env, address);
 
     const title = (body.title || '').trim();
-    const content_html = body.content_html || '';
-    const image_url = body.image_url || '';
-    const link_url = body.link_url || '';
     const is_active = body.is_active === false ? 0 : 1;
     const priority = Number.isFinite(body.priority) ? Number(body.priority) : 0;
 
+    const kind = (body.kind || 'text');
+    if (!['image', 'text', 'script'].includes(kind)) {
+      return c.json({ error: 'Invalid notice kind' }, 400);
+    }
+
+    const image_url = kind === 'image' ? (body.image_url || '') : '';
+    const link_url = kind === 'image' ? (body.link_url || '') : '';
+    const content_html =
+      kind === 'text' ? (body.content_html || '') :
+      kind === 'script' ? (body.content_html || '') : '';
+
     await c.env.DB.prepare(
-      `INSERT INTO notices (title, content_html, image_url, link_url, is_active, priority, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO notices (title, content_html, image_url, link_url, kind, is_active, priority, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     )
-      .bind(title, content_html, image_url, link_url, is_active, priority, new Date().toISOString())
+      .bind(title, content_html, image_url, link_url, kind, is_active, priority, new Date().toISOString())
       .run();
 
     return c.json({ ok: true });
@@ -568,6 +646,7 @@ app.patch('/api/notices/:id', async (c) => {
       link_url?: string;
       is_active?: boolean;
       priority?: number;
+      kind?: 'image' | 'text' | 'script';
     }>();
 
     const { address, timestamp, signature } = body || ({} as any);
@@ -588,6 +667,9 @@ app.patch('/api/notices/:id', async (c) => {
     if (typeof body.link_url === 'string') { fields.push('link_url = ?'); values.push(body.link_url); }
     if (typeof body.priority === 'number') { fields.push('priority = ?'); values.push(Number(body.priority)); }
     if (typeof body.is_active === 'boolean') { fields.push('is_active = ?'); values.push(body.is_active ? 1 : 0); }
+    if (typeof body.kind === 'string' && ['image', 'text', 'script'].includes(body.kind)) {
+      fields.push('kind = ?'); values.push(body.kind);
+    }
 
     fields.push('updated_at = ?'); values.push(new Date().toISOString());
 
