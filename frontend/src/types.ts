@@ -3,6 +3,7 @@
  */
 export interface OffChainUserData {
   userId: string;
+  coin_balance: number;
   referralStats: {
     total_referrals: number;
     level1_count: number;
