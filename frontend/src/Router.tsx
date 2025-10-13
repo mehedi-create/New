@@ -6,7 +6,6 @@ import { useWallet } from './context/WalletContext';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
-import Block from './pages/Block';
 
 const colors = {
   bgLightGreen: '#e8f9f1',
