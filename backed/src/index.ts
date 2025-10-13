@@ -39,6 +39,7 @@ async function ensureSchema(db: D1Database) {
       referrer_id TEXT,
       registration_tx_hash TEXT,
       is_active INTEGER DEFAULT 1,
+      coin_balance INTEGER DEFAULT 0,
       created_at TEXT
     )`,
     `CREATE TABLE IF NOT EXISTS logins (
@@ -83,6 +84,12 @@ async function ensureSchema(db: D1Database) {
   // Try to add 'kind' to existing notices if it's missing (ignore errors)
   try {
     await db.prepare(`ALTER TABLE notices ADD COLUMN kind TEXT DEFAULT 'text'`).run();
+  } catch (_) {
+    // ignore if exists
+  }
+  // Try to add 'coin_balance' to existing users if it's missing (ignore errors)
+  try {
+    await db.prepare(`ALTER TABLE users ADD COLUMN coin_balance INTEGER DEFAULT 0`).run();
   } catch (_) {
     // ignore if exists
   }
@@ -342,6 +349,8 @@ app.post('/api/users/upsert-from-chain', async (c) => {
       return c.json({ error: 'Address is not registered on-chain' }, 400);
     }
 
+    const dbUserBefore = await getDbUserByAddress(c.env.DB, address.toLowerCase());
+
     await upsertDbUser(c.env.DB, {
       walletAddress: address,
       userId: onChain.userId,
@@ -349,6 +358,13 @@ app.post('/api/users/upsert-from-chain', async (c) => {
       txHash: onChain.registeredTxHash,
       createdAtISO: onChain.registeredAt ? new Date(onChain.registeredAt * 1000).toISOString() : undefined,
     });
+    
+    // If user didn't exist before, it's a new registration, so award referrer
+    if (!dbUserBefore && onChain.referrerId && onChain.referrerId.length > 0) {
+      await c.env.DB.prepare('UPDATE users SET coin_balance = coin_balance + 5 WHERE user_id = ?')
+        .bind(onChain.referrerId.toUpperCase())
+        .run();
+    }
 
     return c.json({ ok: true });
   } catch (e: any) {
@@ -378,9 +394,17 @@ app.post('/api/users/:address/login', async (c) => {
     const lower = address.toLowerCase();
     const loginDate = todayISODate();
 
-    await c.env.DB.prepare('INSERT OR IGNORE INTO logins (wallet_address, login_date) VALUES (?, ?)')
-      .bind(lower, loginDate)
-      .run();
+    const { results } = await c.env.DB.prepare('SELECT id FROM logins WHERE wallet_address = ? AND login_date = ?')
+        .bind(lower, loginDate)
+        .all();
+    
+    // Only award coin if it's the first login of the day
+    if (!results || results.length === 0) {
+        await c.env.DB.batch([
+            c.env.DB.prepare('INSERT INTO logins (wallet_address, login_date) VALUES (?, ?)').bind(lower, loginDate),
+            c.env.DB.prepare('UPDATE users SET coin_balance = coin_balance + 1 WHERE wallet_address = ?').bind(lower)
+        ]);
+    }
 
     const row = await c.env.DB.prepare('SELECT COUNT(*) AS cnt FROM logins WHERE wallet_address = ?')
       .bind(lower)
@@ -404,7 +428,7 @@ app.get('/api/dashboard/:walletAddress', async (c) => {
     const db = c.env.DB;
     const lower = walletAddress.toLowerCase();
 
-    const user = await db.prepare('SELECT user_id FROM users WHERE wallet_address = ?').bind(lower).first<{ user_id: string }>();
+    const user = await db.prepare('SELECT user_id, coin_balance FROM users WHERE wallet_address = ?').bind(lower).first<{ user_id: string, coin_balance: number }>();
     if (!user) return c.json({ error: 'User not found' }, 404);
 
     const userId = user.user_id;
@@ -483,6 +507,7 @@ app.get('/api/dashboard/:walletAddress', async (c) => {
 
     return c.json({
       userId,
+      coin_balance: user.coin_balance || 0,
       referralStats: {
         total_referrals: totalReferrals,
         level1_count: level1Count,
