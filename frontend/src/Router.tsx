@@ -87,9 +87,6 @@ export const AppRouter: React.FC = () => {
   return (
     <div style={appShellStyle}>
       <Routes>
-        {/* Public info page (Block page) */}
-        <Route path="/info" element={<Block />} />
-
         <Route
           path="/"
           element={
