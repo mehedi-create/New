@@ -35,6 +35,7 @@ type OnChainData = {
 
 type OffChainData = {
   userId: string;
+  coin_balance: number;
   referralStats: {
     total_referrals: number;
     level1_count: number;
@@ -361,9 +362,23 @@ const Dashboard: React.FC = () => {
                 {onChainData?.role === 'user' ? 'Payout' : 'Withdraw Commission'}
               </button>
             </div>
+            
+            <div style={styles.divider} />
+
             <div style={{ ...styles.small, marginTop: 6 }}>
-              Total Coin Balance: <strong>0.00</strong> — Withdrawal coming soon
+                Total Coin Balance: <strong>{isOffChainLoading ? '...' : (offChainData?.coin_balance ?? 0)}</strong>
             </div>
+            <div style={{...styles.small, marginTop: 4, lineHeight: 1.5}}>
+                Per Refer: 5 coins, Daily Login: 1 coin. <br />
+                Mining rewards will also add here.
+            </div>
+            <button 
+                style={{...styles.buttonGhost, marginTop: 8}} 
+                disabled={true} 
+            >
+                Payout (Coming Soon)
+            </button>
+            
             {onChainData?.role !== 'user' && (
               <div style={{ marginTop: 6, ...styles.small }}>
                 Contract: <strong>${safeMoney(onChainData?.contractBalance)}</strong> • Your Commission: <strong>${safeMoney(onChainData?.adminCommission)}</strong>
@@ -481,6 +496,7 @@ const Dashboard: React.FC = () => {
 // ----------------- Admin Panel with Image/Text/Script options -----------------
 const AdminPanel: React.FC = () => {
   const { account } = useWallet();
+  const queryClient = useQueryClient();
   const [isProcessing, setIsProcessing] = useState(false);
 
   type NoticeType = 'image' | 'text' | 'script';
@@ -546,6 +562,7 @@ Timestamp: ${ts}`;
       title: title.trim(),
       is_active: isActive,
       priority,
+      kind: noticeType,
     };
 
     if (noticeType === 'image') {
@@ -579,6 +596,8 @@ Timestamp: ${ts}`;
       const { timestamp, signature } = await signAdminAction('create_notice', account);
       await api.post('/api/notices', { ...payload, timestamp, signature });
       showSuccessToast('Notice posted');
+      
+      queryClient.invalidateQueries({ queryKey: ['offChainData', account] });
 
       // reset form
       setTitle(''); setPriority(0); setIsActive(true);
