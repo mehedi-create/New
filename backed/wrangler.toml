@@ -11,7 +11,7 @@ ALLOWED_ORIGINS = "http://localhost:5173,https://mehedi35x.pages.dev"
 BSC_RPC_URL = "https://data-seed-prebsc-1-s1.binance.org:8545/"
 
 # Must match frontend/src/config.ts
-CONTRACT_ADDRESS = "0x41069AAf1DAabD4C692C3A9EdCA74f6ED6E513f1"
+CONTRACT_ADDRESS = "0x15f802f435C4aADEA55807687F22DbfB8f893ecB"
 
 # Optional: starting block for event scans (set deploy block if known)
 START_BLOCK = "0"
