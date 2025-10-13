@@ -1,0 +1,22 @@
+// backend/package.json
+{
+  "name": "referral-backend",
+  "version": "1.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:create": "wrangler d1 create referral_db",
+    "db:init": "wrangler d1 execute referral_db --file=./schema.sql",
+    "db:tables": "wrangler d1 execute referral_db --command='.tables'"
+  },
+  "dependencies": {
+    "hono": "^3.12.0",
+    "ethers": "^6.9.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20231218.0",
+    "wrangler": "^3.22.0"
+  }
+}
