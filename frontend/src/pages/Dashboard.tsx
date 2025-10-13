@@ -231,8 +231,8 @@ const styles = {
     gap: 12,
     overflowX: 'auto' as const,
     paddingBottom: 6,
-    scrollSnapType: 'x mandatory',
-    WebkitOverflowScrolling: 'touch',
+    scrollSnapType: 'x mandatory' as any, // mobile-friendly horizontal scroll snapping
+    // Removed WebkitOverflowScrolling to avoid TS type error
   },
   noticeCard: {
     minWidth: 280,
@@ -280,7 +280,6 @@ const styles = {
   },
 } satisfies Record<string, React.CSSProperties | any>;
 
-// Hook: detect mobile viewport
 const useIsMobile = (bp = 768) => {
   const [isMobile, setIsMobile] = useState<boolean>(() =>
     typeof window !== 'undefined' ? window.innerWidth < bp : false
@@ -293,15 +292,11 @@ const useIsMobile = (bp = 768) => {
   return isMobile;
 };
 
-// Execute script tags inside dynamic HTML content (admin notices)
 const DangerousHtml: React.FC<{ html: string }> = ({ html }) => {
   const ref = useRef<HTMLDivElement | null>(null);
-
   useEffect(() => {
     if (!ref.current) return;
     ref.current.innerHTML = html || '';
-
-    // Execute scripts (inline)
     const scripts = Array.from(ref.current.querySelectorAll('script'));
     scripts.forEach((oldScript) => {
       const s = document.createElement('script');
@@ -312,7 +307,6 @@ const DangerousHtml: React.FC<{ html: string }> = ({ html }) => {
       oldScript.replaceWith(s);
     });
   }, [html]);
-
   return <div ref={ref} />;
 };
 
@@ -322,7 +316,6 @@ const Dashboard: React.FC = () => {
   const queryClient = useQueryClient();
   const [isProcessing, setIsProcessing] = useState(false);
 
-  // Block copy/select/context menu on this page
   useEffect(() => {
     const prevent = (e: Event) => e.preventDefault();
     document.addEventListener('copy', prevent);
@@ -351,13 +344,9 @@ const Dashboard: React.FC = () => {
       let role: Role = 'user';
       if (account.toLowerCase() === owner.toLowerCase()) role = 'owner';
       else if (adminFlag) role = 'admin';
-
       const data: OnChainData = { userBalance: balance, hasFundCode: hasCode, role };
       if (role !== 'user') {
-        const [contractBal, adminComm] = await Promise.all([
-          getContractBalance(),
-          getAdminCommission(account),
-        ]);
+        const [contractBal, adminComm] = await Promise.all([getContractBalance(), getAdminCommission(account)]);
         data.contractBalance = contractBal;
         data.adminCommission = adminComm;
       }
@@ -374,14 +363,8 @@ const Dashboard: React.FC = () => {
     },
   });
 
-  const referralCode = useMemo(
-    () => (userId || offChainData?.userId || '').toUpperCase(),
-    [userId, offChainData?.userId]
-  );
-  const referralLink = useMemo(
-    () => `${window.location.origin}/register?ref=${referralCode}`,
-    [referralCode]
-  );
+  const referralCode = useMemo(() => (userId || offChainData?.userId || '').toUpperCase(), [userId, offChainData?.userId]);
+  const referralLink = useMemo(() => `${window.location.origin}/register?ref=${referralCode}`, [referralCode]);
 
   const safeMoney = (val?: string) => {
     const n = parseFloat(val || '0');
@@ -474,7 +457,6 @@ const Dashboard: React.FC = () => {
     }
   };
 
-  // Admin notice form state
   const [noticeForm, setNoticeForm] = useState({
     title: '',
     image_url: '',
@@ -505,12 +487,7 @@ Timestamp: ${ts}`;
     setIsProcessing(true);
     try {
       const { timestamp, signature } = await signAdminAction('create_notice', account);
-      await api.post('/api/notices', {
-        address: account,
-        timestamp,
-        signature,
-        ...noticeForm,
-      });
+      await api.post('/api/notices', { address: account, timestamp, signature, ...noticeForm });
       showSuccessToast('Notice posted');
       setNoticeForm({ title: '', image_url: '', link_url: '', content_html: '', is_active: true, priority: 0 });
       refetchOffChain();
@@ -526,11 +503,7 @@ Timestamp: ${ts}`;
     setIsProcessing(true);
     try {
       const { timestamp, signature } = await signAdminAction('admin_overview', account);
-      const { data } = await api.post('/api/admin/overview', {
-        address: account,
-        timestamp,
-        signature,
-      });
+      const { data } = await api.post('/api/admin/overview', { address: account, timestamp, signature });
       const totalUsers = data?.totals?.total_registered_users ?? 0;
       const contractBalRaw = data?.totals?.contract_balance_raw ?? '0';
       const decimals = Number((config as any).usdtDecimals ?? 18);
@@ -543,9 +516,11 @@ Timestamp: ${ts}`;
     }
   };
 
+  const referralCode = useMemo(() => (userId || offChainData?.userId || '').toUpperCase(), [userId, offChainData?.userId]);
+  const referralLink = useMemo(() => `${window.location.origin}/register?ref=${referralCode}`, [referralCode]);
   const initials = (referralCode || 'U').slice(0, 2).toUpperCase();
 
-  // Dynamic styles for mobile
+  const isMobile = useIsMobile();
   const btnFull = isMobile ? { width: '100%' } : {};
   const copyGrid = isMobile ? { gridTemplateColumns: '1fr' } : {};
   const noticeCardSize = isMobile ? { minWidth: '86%', maxWidth: '86%' } : {};
@@ -564,7 +539,6 @@ Timestamp: ${ts}`;
         </div>
 
         <div style={styles.grid as any}>
-          {/* Balance + Payout */}
           <div style={{ ...styles.card, ...styles.cardTall }}>
             <h3 style={styles.cardTitle}>Available Balance</h3>
             {isOnChainLoading ? (
@@ -606,7 +580,6 @@ Timestamp: ${ts}`;
             )}
           </div>
 
-          {/* Stats + Actions */}
           <div style={{ ...styles.card, ...styles.cardTall }}>
             <h3 style={styles.cardTitle}>Your Stats</h3>
             <div style={styles.statRow}>
@@ -641,7 +614,6 @@ Timestamp: ${ts}`;
             )}
           </div>
 
-          {/* Notice board */}
           <div style={{ ...styles.card }}>
             <h3 style={styles.cardTitle}>Notice Board</h3>
             <div style={styles.noticeScroller}>
@@ -672,7 +644,6 @@ Timestamp: ${ts}`;
             </div>
           </div>
 
-          {/* Referral code + link */}
           <div style={{ ...styles.card }}>
             <h3 style={styles.cardTitle}>Share & Earn</h3>
             <div style={{ marginBottom: 10 }}>
@@ -691,7 +662,6 @@ Timestamp: ${ts}`;
             </div>
           </div>
 
-          {/* Admin panel */}
           {(onChainData?.role === 'admin' || onChainData?.role === 'owner') && (
             <div style={{ ...styles.card, gridColumn: '1 / -1' }}>
               <h3 style={styles.cardTitle}>Admin Panel</h3>
