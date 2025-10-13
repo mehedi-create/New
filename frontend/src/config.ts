@@ -8,7 +8,7 @@ const testnetConfig = {
   apiBaseUrl: 'https://referral-backend.mehedi35x.workers.dev',
 
   // Smart contract addresses
-  contractAddress: '0x41069AAf1DAabD4C692C3A9EdCA74f6ED6E513f1', // must match wrangler.toml
+  contractAddress: '0x15f802f435C4aADEA55807687F22DbfB8f893ecB', // must match wrangler.toml
   usdtAddress: '0x337610d27c682E347C9cD60BD4b3b107C9d34dDd',
 
   // Token/chain config
