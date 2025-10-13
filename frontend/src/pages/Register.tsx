@@ -17,7 +17,8 @@ const colors = {
   danger: '#b91c1c',
 };
 
-const styles: Record<string, React.CSSProperties> = {
+type Style = React.CSSProperties;
+const styles: Record<string, Style> = {
   page: {
     minHeight: '100vh',
     width: '100%',
@@ -50,10 +51,12 @@ const styles: Record<string, React.CSSProperties> = {
     color: colors.navySoft,
     opacity: 0.95,
   },
+  // Responsive without media queries
   grid: {
     display: 'grid',
-    gridTemplateColumns: '1.1fr 1fr',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
     gap: 28,
+    alignItems: 'stretch',
   },
   panel: {
     padding: 24,
@@ -61,6 +64,10 @@ const styles: Record<string, React.CSSProperties> = {
     background: 'rgba(255,255,255,0.60)',
     border: '1px solid rgba(11,27,59,0.08)',
     boxShadow: '0 10px 26px rgba(11,27,59,0.06)',
+    minHeight: 420,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 12,
   },
   sectionTitle: {
     margin: '0 0 12px 0',
@@ -160,7 +167,7 @@ const styles: Record<string, React.CSSProperties> = {
     color: colors.deepNavy,
     border: '1px solid rgba(11,27,59,0.08)',
     boxShadow: '0 12px 28px rgba(11,27,59,0.10)',
-    textAlign: 'center' as const,
+    textAlign: 'center',
   },
   spinner: {
     width: 26,
@@ -175,10 +182,6 @@ const styles: Record<string, React.CSSProperties> = {
     marginTop: 8,
     fontSize: 12,
     color: colors.navySoft,
-  },
-  // Responsive
-  '@media (max-width: 880px)': {
-    grid: { display: 'block' },
   },
 };
 
@@ -252,7 +255,7 @@ const Register: React.FC = () => {
 
     setIsProcessing(true);
     try {
-      // Single user action (one button). Wallet may prompt twice.
+      // One button, but ERC20 approve + register হিসেবে দুটি প্রম্পট হবে
       setLoadingMessage(`Preparing payment of ${config.registrationFee} USDT... (Approval)`);
       const approveTx = await approveUSDT(config.registrationFee);
       await approveTx.wait();
@@ -292,7 +295,7 @@ const Register: React.FC = () => {
           </p>
         </header>
 
-        <div style={styles.grid as any}>
+        <div style={styles.grid}>
           <section style={styles.panel}>
             <h2 style={styles.sectionTitle}>
               Why the $12 USDT fee?
