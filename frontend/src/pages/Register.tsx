@@ -15,6 +15,7 @@ const colors = {
   accentDark: '#0e9c8c',
   white: '#ffffff',
   danger: '#b91c1c',
+  mutedGray: '#eef2f6',
 };
 
 type Style = React.CSSProperties;
@@ -32,68 +33,50 @@ const styles: Record<string, Style> = {
   wrap: {
     width: '100%',
     maxWidth: 1100,
-    padding: '48px 24px 56px',
+    padding: '40px 18px 56px',
   },
   header: {
-    marginBottom: 22,
+    marginBottom: 16,
     textAlign: 'center',
   },
   title: {
     margin: 0,
-    fontSize: '2.2rem',
+    fontSize: '2.1rem',
     fontWeight: 800,
     color: colors.deepNavy,
     letterSpacing: '0.2px',
   },
   tagline: {
-    marginTop: 8,
-    fontSize: '1.05rem',
+    marginTop: 6,
+    fontSize: '1rem',
     color: colors.navySoft,
     opacity: 0.95,
   },
-  // Responsive without media queries
   grid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
-    gap: 28,
+    gridTemplateColumns: '1fr',
+    gap: 20,
     alignItems: 'stretch',
   },
   panel: {
-    padding: 24,
+    padding: 18,
     borderRadius: 16,
     background: 'rgba(255,255,255,0.60)',
     border: '1px solid rgba(11,27,59,0.08)',
     boxShadow: '0 10px 26px rgba(11,27,59,0.06)',
-    minHeight: 420,
     display: 'flex',
     flexDirection: 'column',
     gap: 12,
   },
   sectionTitle: {
-    margin: '0 0 12px 0',
-    fontSize: '1.2rem',
-    fontWeight: 800,
-  },
-  bullet: {
-    margin: '8px 0',
-    lineHeight: 1.55,
-    color: colors.navySoft,
-    fontSize: '0.98rem',
-  },
-  highlight: {
-    display: 'inline-flex',
-    padding: '6px 10px',
-    borderRadius: 999,
-    background: 'rgba(20,184,166,0.12)',
-    color: colors.accentDark,
-    fontWeight: 800,
-    fontSize: 12,
-    marginLeft: 8,
+    margin: '0 0 10px 0',
+    fontSize: '1.1rem',
+    fontWeight: 900,
   },
   formRow: {
     display: 'grid',
     gridTemplateColumns: '1fr',
-    gap: 14,
+    gap: 12,
   },
   inputGroup: {
     display: 'flex',
@@ -106,26 +89,31 @@ const styles: Record<string, Style> = {
     color: colors.navySoft,
   },
   input: {
-    height: 48,
+    height: 46,
     borderRadius: 12,
     border: '1px solid rgba(11,27,59,0.15)',
-    padding: '0 14px',
+    padding: '0 12px',
     fontSize: '1rem',
     outline: 'none',
     color: colors.deepNavy,
     background: colors.white,
   },
+  inputLocked: {
+    background: colors.mutedGray,
+    cursor: 'not-allowed',
+  },
   hint: {
     fontSize: 12,
     color: colors.navySoft,
-    opacity: 0.85,
+    opacity: 0.9,
   },
   dangerText: {
     fontSize: 12,
     color: colors.danger,
+    fontWeight: 700,
   },
   button: {
-    height: 50,
+    height: 48,
     borderRadius: 14,
     background: colors.accent,
     color: colors.white,
@@ -140,7 +128,7 @@ const styles: Record<string, Style> = {
     cursor: 'not-allowed',
   },
   feeBox: {
-    marginTop: 10,
+    marginTop: 6,
     padding: '10px 12px',
     borderRadius: 12,
     background: 'rgba(20,184,166,0.08)',
@@ -159,9 +147,9 @@ const styles: Record<string, Style> = {
     zIndex: 50,
   },
   overlayCard: {
-    minWidth: 320,
+    minWidth: 300,
     maxWidth: 420,
-    padding: 20,
+    padding: 18,
     borderRadius: 14,
     background: colors.white,
     color: colors.deepNavy,
@@ -172,14 +160,14 @@ const styles: Record<string, Style> = {
   spinner: {
     width: 26,
     height: 26,
-    margin: '0 auto 10px',
+    margin: '0 auto 8px',
     border: '3px solid rgba(11,27,59,0.15)',
     borderTopColor: colors.accentDark,
     borderRadius: '50%',
     animation: 'spin 0.8s linear infinite',
   },
   smallNote: {
-    marginTop: 8,
+    marginTop: 6,
     fontSize: 12,
     color: colors.navySoft,
   },
@@ -195,6 +183,8 @@ const injectSpinnerKeyframes = () => {
   document.head.appendChild(style);
 };
 
+const EXACT_LEN = 6; // Smart contract currently requires exactly 6 chars
+
 const Register: React.FC = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -202,6 +192,7 @@ const Register: React.FC = () => {
 
   const [userId, setUserId] = useState('');
   const [referralCode, setReferralCode] = useState('');
+  const [referralLocked, setReferralLocked] = useState(false);
   const [fundCode, setFundCode] = useState('');
   const [confirmFundCode, setConfirmFundCode] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
@@ -212,10 +203,15 @@ const Register: React.FC = () => {
     injectSpinnerKeyframes();
   }, []);
 
-  // Pre-fill ref from URL (no auto actions)
+  // Prefill ref from URL and lock if valid
   useEffect(() => {
-    const ref = searchParams.get('ref');
-    if (ref) setReferralCode(ref.toUpperCase());
+    const ref = (searchParams.get('ref') || '').toUpperCase().trim();
+    if (ref) {
+      setReferralCode(ref);
+      if (ref.length === EXACT_LEN) {
+        setReferralLocked(true);
+      }
+    }
   }, [searchParams]);
 
   // Block copy/select/context menu on this page
@@ -233,11 +229,11 @@ const Register: React.FC = () => {
     };
   }, []);
 
-  // Validate inputs
+  // Validate inputs (exact 6 to match contract)
   useEffect(() => {
     const valid =
-      userId.trim().length === 6 &&
-      referralCode.trim().length === 6 &&
+      userId.trim().length === EXACT_LEN &&
+      referralCode.trim().length === EXACT_LEN &&
       fundCode.trim().length >= 4 &&
       fundCode === confirmFundCode;
     setIsFormValid(valid);
@@ -255,7 +251,6 @@ const Register: React.FC = () => {
 
     setIsProcessing(true);
     try {
-      // One button, but ERC20 approve + register হিসেবে দুটি প্রম্পট হবে
       setLoadingMessage(`Preparing payment of ${config.registrationFee} USDT... (Approval)`);
       const approveTx = await approveUSDT(config.registrationFee);
       await approveTx.wait();
@@ -280,7 +275,7 @@ const Register: React.FC = () => {
         <div style={styles.overlay}>
           <div style={styles.overlayCard}>
             <div style={styles.spinner} />
-            <div style={{ fontWeight: 800, marginBottom: 6 }}>Processing</div>
+            <div style={{ fontWeight: 800, marginBottom: 4 }}>Processing</div>
             <div style={{ fontSize: '0.95rem', color: colors.navySoft }}>{loadingMessage}</div>
             <div style={styles.smallNote}>Please approve the prompts in your wallet.</div>
           </div>
@@ -290,70 +285,56 @@ const Register: React.FC = () => {
       <div style={styles.wrap}>
         <header style={styles.header}>
           <h1 style={styles.title}>Create your Web3 account</h1>
-          <p style={styles.tagline}>
-            A clean, fair and community‑driven space—powered by smart contracts.
-          </p>
+          <p style={styles.tagline}>A clean, fair and community‑driven space—powered by smart contracts.</p>
         </header>
 
         <div style={styles.grid}>
+          {/* Form first */}
           <section style={styles.panel}>
-            <h2 style={styles.sectionTitle}>
-              Why the $12 USDT fee?
-              <span style={styles.highlight}>Anti‑spam protection</span>
-            </h2>
-            <p style={styles.bullet}>
-              To keep our decentralized community healthy and spam‑free, we require a small, one‑time registration fee of <strong>${config.registrationFee} USDT</strong>.
-            </p>
-            <p style={styles.bullet}>
-              This helps prevent bot signups, protects genuine members, and improves the overall quality of the network.
-            </p>
-            <p style={styles.bullet}>
-              The process is fully transparent—handled by a smart contract you control from your own wallet.
-            </p>
+            <h2 style={styles.sectionTitle}>Registration form</h2>
 
-            <div style={styles.feeBox}>
-              What you’ll need:
-              <ul style={{ margin: '6px 0 0 18px' }}>
-                <li>A unique 6‑character User ID</li>
-                <li>Your referrer’s 6‑character ID</li>
-                <li>A secret Fund Code (min 4 chars) for withdrawals</li>
-                <li>${config.registrationFee} USDT balance in your wallet</li>
-              </ul>
-            </div>
-            <p style={{ ...styles.smallNote, marginTop: 10 }}>
-              Note: Your Fund Code is required for withdrawals and cannot be recovered if lost. Store it safely.
-            </p>
-          </section>
-
-          <section style={styles.panel}>
-            <h2 style={styles.sectionTitle}>Complete your registration</h2>
             <div style={styles.formRow}>
               <div style={styles.inputGroup}>
-                <label htmlFor="userId" style={styles.label}>Your User ID (6 characters)</label>
+                <label htmlFor="userId" style={styles.label}>
+                  Your User ID (exactly {EXACT_LEN} characters)
+                </label>
                 <input
                   id="userId"
                   type="text"
                   value={userId}
-                  maxLength={6}
+                  maxLength={EXACT_LEN}
                   onChange={(e) => setUserId(e.target.value.toUpperCase())}
                   placeholder="e.g., MYID12"
                   style={styles.input}
                   disabled={isProcessing}
                 />
+                <span style={styles.hint}>Use uppercase letters/numbers. This must be exactly {EXACT_LEN} to match the smart contract.</span>
               </div>
 
               <div style={styles.inputGroup}>
-                <label htmlFor="referralCode" style={styles.label}>Referrer’s ID (6 characters)</label>
+                <label htmlFor="referralCode" style={styles.label}>
+                  Referrer’s ID (exactly {EXACT_LEN} characters)
+                </label>
                 <input
                   id="referralCode"
                   type="text"
                   value={referralCode}
-                  maxLength={6}
-                  onChange={(e) => setReferralCode(e.target.value.toUpperCase())}
+                  maxLength={EXACT_LEN}
+                  onChange={(e) => {
+                    if (!referralLocked) setReferralCode(e.target.value.toUpperCase());
+                  }}
                   placeholder="Enter your referrer’s ID"
-                  style={styles.input}
-                  disabled={isProcessing}
+                  style={{
+                    ...styles.input,
+                    ...(referralLocked ? styles.inputLocked : {}),
+                  }}
+                  disabled={isProcessing || referralLocked}
                 />
+                {referralLocked ? (
+                  <span style={styles.hint}>Referral ID set from link and locked.</span>
+                ) : (
+                  <span style={styles.hint}>If you arrived via a referral link, this will auto‑fill and lock.</span>
+                )}
               </div>
 
               <div style={styles.inputGroup}>
@@ -367,8 +348,10 @@ const Register: React.FC = () => {
                   style={styles.input}
                   disabled={isProcessing}
                 />
-                <span style={styles.hint}>Used to authorize withdrawals from your account.</span>
-                <span style={styles.dangerText}>Do not share this code with anyone.</span>
+                <span style={styles.dangerText}>
+                  WARNING: This code is required for withdrawals. If you lose it, it cannot be recovered by anyone.
+                </span>
+                <span style={styles.hint}>Write it down and store it safely. Do not share with anyone.</span>
               </div>
 
               <div style={styles.inputGroup}>
@@ -396,10 +379,28 @@ const Register: React.FC = () => {
               >
                 Register Now — {config.registrationFee} USDT
               </button>
-              <div style={styles.smallNote}>
-                By proceeding, you confirm this one‑time anti‑spam fee and agree to our community guidelines.
-              </div>
             </div>
+          </section>
+
+          {/* Fee explanation below */}
+          <section style={styles.panel}>
+            <h2 style={styles.sectionTitle}>Why the $12 USDT fee?</h2>
+            <p style={styles.hint}>
+              To keep our decentralized community healthy and spam‑free, we require a small, one‑time registration fee of <strong>{config.registrationFee} USDT</strong>.
+              This helps prevent bot signups, protects genuine members, and improves the overall quality of the network.
+            </p>
+            <div style={styles.feeBox}>
+              What you’ll need:
+              <ul style={{ margin: '6px 0 0 18px' }}>
+                <li>Exactly {EXACT_LEN}‑character User ID</li>
+                <li>Exactly {EXACT_LEN}‑character Referrer’s ID</li>
+                <li>A secret Fund Code (min 4 chars) for withdrawals</li>
+                <li>{config.registrationFee} USDT balance in your wallet</li>
+              </ul>
+            </div>
+            <p style={{ ...styles.smallNote, marginTop: 8 }}>
+              Note: IDs longer than {EXACT_LEN} are not supported by the current smart contract. If you need 6–8 later, we must deploy a new contract.
+            </p>
           </section>
         </div>
       </div>
