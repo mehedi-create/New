@@ -13,10 +13,14 @@ import {
   withdrawCommission,
   emergencyWithdrawAll,
   signAuthMessage,
+  approveUSDT,
+  buyMiner,
+  withdrawLiquidity,
+  getUserMiningStats,
 } from '../utils/contract';
 import { showSuccessToast, showErrorToast } from '../utils/notification';
 import { config } from '../config';
-import { api, getDashboardData, upsertUserFromChain } from '../services/api';
+import { api, getDashboardData, getUserBootstrap, upsertUserFromChain } from '../services/api';
 import { ethers, BrowserProvider } from 'ethers';
 
 type Role = 'user' | 'admin' | 'owner';
@@ -37,9 +41,7 @@ type OffChainData = {
     level2_count: number;
     level3_count: number;
   };
-  logins: {
-    total_login_days: number;
-  };
+  logins: { total_login_days: number };
   notices: Array<{
     id: number;
     title: string;
@@ -91,188 +93,81 @@ const styles: Record<string, React.CSSProperties & Record<string, any>> = {
     marginBottom: 12,
     flexWrap: 'wrap',
   },
-  brand: {
-    fontWeight: 900,
-    fontSize: 18,
-    letterSpacing: 0.3,
-  },
-  userBox: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 8,
-  },
+  brand: { fontWeight: 900, fontSize: 18, letterSpacing: 0.3 },
+  userBox: { display: 'flex', alignItems: 'center', gap: 8 },
   avatar: {
-    width: 34,
-    height: 34,
-    borderRadius: '50%',
-    background: 'rgba(11,27,59,0.12)',
-    display: 'grid',
-    placeItems: 'center',
-    fontWeight: 800,
+    width: 34, height: 34, borderRadius: '50%',
+    background: 'rgba(11,27,59,0.12)', display: 'grid', placeItems: 'center', fontWeight: 800,
   },
   logoutBtn: {
-    height: 36,
-    padding: '0 12px',
-    borderRadius: 10,
-    border: '1px solid rgba(11,27,59,0.15)',
-    background: 'rgba(255,255,255,0.7)',
-    cursor: 'pointer',
-    fontWeight: 700,
+    height: 36, padding: '0 12px', borderRadius: 10,
+    border: '1px solid rgba(11,27,59,0.15)', background: 'rgba(255,255,255,0.7)',
+    cursor: 'pointer', fontWeight: 700,
   },
-  grid: {
-    display: 'grid',
-    gridTemplateColumns: '1fr',
-    gap: 12,
-    alignItems: 'stretch',
-  },
+  grid: { display: 'grid', gridTemplateColumns: '1fr', gap: 12, alignItems: 'stretch' },
   card: {
-    background: 'rgba(255,255,255,0.7)',
-    border: `1px solid ${colors.grayLine}`,
-    borderRadius: 14,
-    padding: 14,
-    minHeight: 140,
-    boxShadow: '0 8px 18px rgba(11,27,59,0.06)',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 8,
+    background: 'rgba(255,255,255,0.7)', border: `1px solid ${colors.grayLine}`,
+    borderRadius: 14, padding: 14, minHeight: 140, boxShadow: '0 8px 18px rgba(11,27,59,0.06)',
+    display: 'flex', flexDirection: 'column', gap: 8,
   },
-  cardTitle: {
-    margin: '0 0 6px 0',
-    fontSize: 16,
-    fontWeight: 900,
-  },
-  statRow: {
-    display: 'grid',
-    gridTemplateColumns: '1fr',
-    gap: 8,
-  },
+  cardTitle: { margin: '0 0 6px 0', fontSize: 16, fontWeight: 900 },
+  statRow: { display: 'grid', gridTemplateColumns: '1fr', gap: 8 },
   statBox: {
-    background: 'rgba(255,255,255,0.85)',
-    border: `1px solid ${colors.grayLine}`,
-    borderRadius: 12,
-    padding: 10,
-    textAlign: 'center',
+    background: 'rgba(255,255,255,0.85)', border: `1px solid ${colors.grayLine}`,
+    borderRadius: 12, padding: 10, textAlign: 'center',
   },
-  statLabel: {
-    fontSize: 12,
-    color: colors.navySoft,
-  },
-  statValue: {
-    fontSize: 22,
-    fontWeight: 900,
-  },
-  balance: {
-    fontSize: 26,
-    fontWeight: 900,
-    margin: '4px 0 6px',
-  },
+  statLabel: { fontSize: 12, color: colors.navySoft },
+  statValue: { fontSize: 22, fontWeight: 900 },
+  balance: { fontSize: 26, fontWeight: 900, margin: '4px 0 6px' },
   button: {
-    height: 44,
-    borderRadius: 10,
-    background: colors.accent,
-    color: colors.white,
-    border: 'none',
-    fontSize: 14,
-    fontWeight: 800,
-    cursor: 'pointer',
-    padding: '0 12px',
-    width: '100%',
+    height: 44, borderRadius: 10, background: colors.accent, color: colors.white, border: 'none',
+    fontSize: 14, fontWeight: 800, cursor: 'pointer', padding: '0 12px', width: '100%',
   },
   buttonGhost: {
-    height: 44,
-    borderRadius: 10,
-    background: 'transparent',
-    color: colors.deepNavy,
-    border: `1px solid ${colors.grayLine}`,
-    fontSize: 14,
-    fontWeight: 800,
-    cursor: 'pointer',
-    padding: '0 12px',
-    width: '100%',
+    height: 44, borderRadius: 10, background: 'transparent', color: colors.deepNavy,
+    border: `1px solid ${colors.grayLine}`, fontSize: 14, fontWeight: 800, cursor: 'pointer',
+    padding: '0 12px', width: '100%',
   },
   buttonDanger: {
-    height: 44,
-    borderRadius: 10,
-    background: colors.danger,
-    color: colors.white,
-    border: 'none',
-    fontSize: 14,
-    fontWeight: 800,
-    cursor: 'pointer',
-    padding: '0 12px',
-    width: '100%',
+    height: 44, borderRadius: 10, background: colors.danger, color: colors.white, border: 'none',
+    fontSize: 14, fontWeight: 800, cursor: 'pointer', padding: '0 12px', width: '100%',
   },
-  row: {
-    display: 'grid',
-    gridTemplateColumns: '1fr',
-    gap: 8,
-    width: '100%',
-  },
+  row: { display: 'grid', gridTemplateColumns: '1fr', gap: 8, width: '100%' },
   input: {
-    height: 44,
-    borderRadius: 10,
-    border: `1px solid ${colors.grayLine}`,
-    padding: '0 12px',
-    background: colors.white,
-    outline: 'none',
-    color: colors.deepNavy,
-    fontSize: 14,
-    width: '100%',
+    height: 40, borderRadius: 10, border: `1px solid ${colors.grayLine}`, padding: '0 10px',
+    background: colors.white, outline: 'none', color: colors.deepNavy, fontSize: 14, width: '100%',
   },
-  copyWrap: {
-    display: 'grid',
-    gridTemplateColumns: '1fr',
-    gap: 8,
-    alignItems: 'center',
-  },
+  copyWrap: { display: 'grid', gridTemplateColumns: '1fr', gap: 8, alignItems: 'center' },
   noticeScroller: {
-    display: 'flex',
-    gap: 10,
-    overflowX: 'auto',
-    paddingBottom: 6,
-    scrollSnapType: 'x mandatory' as any,
+    display: 'flex', gap: 10, overflowX: 'auto', paddingBottom: 6, scrollSnapType: 'x mandatory' as any,
   },
   noticeCard: {
-    minWidth: '92%',
-    maxWidth: '92%',
-    background: 'rgba(255,255,255,0.9)',
-    border: `1px solid ${colors.grayLine}`,
-    borderRadius: 12,
-    padding: 10,
-    flex: '0 0 auto',
-    cursor: 'pointer',
-    scrollSnapAlign: 'start',
+    minWidth: '92%', maxWidth: '92%', background: 'rgba(255,255,255,0.9)', border: `1px solid ${colors.grayLine}`,
+    borderRadius: 12, padding: 10, flex: '0 0 auto', cursor: 'pointer', scrollSnapAlign: 'start',
   },
   noticeImg: {
-    width: '100%',
-    height: 140,
-    objectFit: 'cover' as const,
-    borderRadius: 10,
-    marginBottom: 8,
-    background: '#f2f5f7',
+    width: '100%', height: 140, objectFit: 'cover' as const, borderRadius: 10, marginBottom: 8, background: '#f2f5f7',
   },
   small: { fontSize: 12, color: colors.navySoft },
   muted: { opacity: 0.8 },
   textarea: {
-    minHeight: 120,
-    borderRadius: 10,
-    padding: 10,
-    border: `1px solid ${colors.grayLine}`,
-    fontFamily: 'monospace',
-    fontSize: 13,
-    background: colors.white,
-    color: colors.deepNavy,
-    outline: 'none',
-    width: '100%',
+    minHeight: 120, borderRadius: 10, padding: 10, border: `1px solid ${colors.grayLine}`,
+    fontFamily: 'monospace', fontSize: 13, background: colors.white, color: colors.deepNavy,
+    outline: 'none', width: '100%',
   },
-  divider: {
-    height: 1,
-    background: colors.grayLine,
-    margin: '6px 0',
+  divider: { height: 1, background: colors.grayLine, margin: '6px 0' },
+
+  tabRow: { display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 6 },
+  tabBtn: {
+    height: 36, borderRadius: 10, border: `1px solid ${colors.grayLine}`, background: 'rgba(255,255,255,0.85)',
+    fontWeight: 800, cursor: 'pointer',
+  },
+  tabBtnActive: { background: colors.accent, color: '#fff', borderColor: colors.accent },
+  previewImg: {
+    width: '100%', maxHeight: 200, objectFit: 'cover' as const, borderRadius: 10, border: `1px solid ${colors.grayLine}`,
   },
 };
 
-// Execute script tags inside dynamic HTML content (admin notices)
 const DangerousHtml: React.FC<{ html: string }> = ({ html }) => {
   const ref = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -281,9 +176,7 @@ const DangerousHtml: React.FC<{ html: string }> = ({ html }) => {
     const scripts = Array.from(ref.current.querySelectorAll('script'));
     scripts.forEach((oldScript) => {
       const s = document.createElement('script');
-      for (const { name, value } of Array.from(oldScript.attributes)) {
-        s.setAttribute(name, value);
-      }
+      for (const { name, value } of Array.from(oldScript.attributes)) s.setAttribute(name, value);
       s.textContent = oldScript.textContent;
       oldScript.replaceWith(s);
     });
@@ -296,7 +189,7 @@ const Dashboard: React.FC = () => {
   const queryClient = useQueryClient();
   const [isProcessing, setIsProcessing] = useState(false);
 
-  // Block copy/select/context menu on this page
+  // Prevent copy/select/context menu
   useEffect(() => {
     const prevent = (e: Event) => e.preventDefault();
     document.addEventListener('copy', prevent);
@@ -311,26 +204,37 @@ const Dashboard: React.FC = () => {
     };
   }, []);
 
-  const { data: onChainData, isLoading: isOnChainLoading, refetch: refetchOnChain } = useQuery<OnChainData | null>({
+  // Auto-sync off-chain if needed
+  useEffect(() => {
+    if (!account) return;
+    (async () => {
+      try {
+        const { data } = await getUserBootstrap(account);
+        if (data?.action === 'await_backend_sync') {
+          const { timestamp, signature } = await signAuthMessage(account);
+          await upsertUserFromChain(account, timestamp, signature);
+          queryClient.invalidateQueries({ queryKey: ['offChainData', account] });
+        }
+      } catch {}
+    })();
+  }, [account, queryClient]);
+
+  const { data: onChainData, isLoading: isOnChainLoading } = useQuery<OnChainData | null>({
     queryKey: ['onChainData', account],
     enabled: !!account,
+    refetchInterval: 15000,
     queryFn: async () => {
       if (!account) return null;
       const [owner, adminFlag, balance, hasCode] = await Promise.all([
-        getOwner(),
-        isAdmin(account),
-        getUserBalance(account),
-        hasSetFundCode(account),
+        getOwner(), isAdmin(account), getUserBalance(account), hasSetFundCode(account),
       ]);
       let role: Role = 'user';
       if (account.toLowerCase() === owner.toLowerCase()) role = 'owner';
       else if (adminFlag) role = 'admin';
-
       const data: OnChainData = { userBalance: balance, hasFundCode: hasCode, role };
       if (role !== 'user') {
         const [contractBal, adminComm] = await Promise.all([getContractBalance(), getAdminCommission(account)]);
-        data.contractBalance = contractBal;
-        data.adminCommission = adminComm;
+        data.contractBalance = contractBal; data.adminCommission = adminComm;
       }
       return data;
     },
@@ -339,9 +243,32 @@ const Dashboard: React.FC = () => {
   const { data: offChainData, isLoading: isOffChainLoading, refetch: refetchOffChain } = useQuery<OffChainData>({
     queryKey: ['offChainData', account],
     enabled: !!account,
+    refetchInterval: 15000,
     queryFn: async () => {
       const res = await getDashboardData(account!);
       return res.data as OffChainData;
+    },
+  });
+
+  const { data: miningStats, refetch: refetchMining } = useQuery<{ count: number; totalDeposited: string }>({
+    queryKey: ['miningStats', account],
+    enabled: !!account,
+    queryFn: async () => {
+      if (!account) return { count: 0, totalDeposited: '0.00' };
+      return getUserMiningStats(account);
+    },
+  });
+
+  const { data: referralList = [], isLoading: isRefsLoading } = useQuery<string[]>({
+    queryKey: ['referrals', account],
+    enabled: !!account,
+    refetchInterval: 60000,
+    queryFn: async () => {
+      try {
+        const r = await api.get(`/api/referrals/${account}`);
+        if (Array.isArray(r.data?.list)) return r.data.list as string[];
+      } catch {}
+      return [];
     },
   });
 
@@ -361,68 +288,29 @@ const Dashboard: React.FC = () => {
   };
 
   const handleUserPayout = async () => {
-    if (!onChainData?.hasFundCode) {
-      showErrorToast('Fund code not set. Please register with a fund code.');
-      return;
-    }
-    const code = window.prompt('Enter your secret Fund Code');
-    if (!code) return;
+    if (!onChainData?.hasFundCode) { showErrorToast('Fund code not set. Please register with a fund code.'); return; }
+    const code = window.prompt('Enter your secret Fund Code'); if (!code) return;
     setIsProcessing(true);
     try {
-      const tx = await withdrawWithFundCode(code);
-      if (tx?.wait) await tx.wait();
+      const tx = await withdrawWithFundCode(code); if (tx?.wait) await tx.wait();
       showSuccessToast('Payout successful!');
-      refetchOnChain();
-    } catch (e) {
-      showErrorToast(e, 'Payout failed');
-    } finally {
-      setIsProcessing(false);
-    }
+    } catch (e) { showErrorToast(e, 'Payout failed'); } finally { setIsProcessing(false); }
   };
 
   const handleAdminPayout = async () => {
     setIsProcessing(true);
-    try {
-      const tx = await withdrawCommission();
-      if (tx?.wait) await tx.wait();
-      showSuccessToast('Commission withdrawn');
-      refetchOnChain();
-    } catch (e) {
-      showErrorToast(e, 'Commission withdrawal failed');
-    } finally {
-      setIsProcessing(false);
-    }
+    try { const tx = await withdrawCommission(); if (tx?.wait) await tx.wait(); showSuccessToast('Commission withdrawn'); }
+    catch (e) { showErrorToast(e, 'Commission withdrawal failed'); }
+    finally { setIsProcessing(false); }
   };
 
   const handleEmergencyWithdraw = async () => {
     if (!onChainData || onChainData.role !== 'owner') return;
     if (!window.confirm('Withdraw all contract funds to owner wallet?')) return;
     setIsProcessing(true);
-    try {
-      const tx = await emergencyWithdrawAll();
-      if (tx?.wait) await tx.wait();
-      showSuccessToast('Emergency withdraw completed');
-      refetchOnChain();
-    } catch (e) {
-      showErrorToast(e, 'Emergency withdraw failed');
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const handleSyncFromChain = async () => {
-    if (!account) return;
-    setIsProcessing(true);
-    try {
-      const { timestamp, signature } = await signAuthMessage(account);
-      await upsertUserFromChain(account, timestamp, signature);
-      showSuccessToast('Synced with backend');
-      refetchOffChain();
-    } catch (e) {
-      showErrorToast(e, 'Sync failed');
-    } finally {
-      setIsProcessing(false);
-    }
+    try { const tx = await emergencyWithdrawAll(); if (tx?.wait) await tx.wait(); showSuccessToast('Emergency withdraw completed'); }
+    catch (e) { showErrorToast(e, 'Emergency withdraw failed'); }
+    finally { setIsProcessing(false); }
   };
 
   const handleMarkTodayLogin = async () => {
@@ -433,80 +321,24 @@ const Dashboard: React.FC = () => {
       await api.post(`/api/users/${account}/login`, { timestamp, signature });
       showSuccessToast('Login counted for today');
       refetchOffChain();
-    } catch (e) {
-      showErrorToast(e, 'Unable to mark login');
-    } finally {
-      setIsProcessing(false);
-    }
+    } catch (e) { showErrorToast(e, 'Unable to mark login'); }
+    finally { setIsProcessing(false); }
   };
 
-  // Admin notice form state
-  const [noticeForm, setNoticeForm] = useState({
-    title: '',
-    image_url: '',
-    link_url: '',
-    content_html: '',
-    is_active: true,
-    priority: 0,
-  });
-  const [adminOverview, setAdminOverview] = useState<{ total_users?: number; contract_balance?: string } | null>(null);
+  const [miningAmount, setMiningAmount] = useState<string>(''); const amountNum = Number(miningAmount || '0');
+  const canBuy = !!account && amountNum >= 5;
 
-  const signAdminAction = async (purpose: string, address: string) => {
-    const provider = new BrowserProvider((window as any).ethereum);
-    const signer = await provider.getSigner();
-    const ts = Math.floor(Date.now() / 1000);
-    const message = `Admin action authorization
-Purpose: ${purpose}
-Address: ${ethers.getAddress(address)}
-Timestamp: ${ts}`;
-    const signature = await signer.signMessage(message);
-    return { timestamp: ts, signature, message };
-  };
-
-  const handleCreateNotice = async () => {
-    if (!account || !onChainData || onChainData.role === 'user') {
-      showErrorToast('Only admin/owner can post notices.');
-      return;
-    }
+  const handleBuyMiner = async () => {
+    if (!account) return;
+    if (!canBuy) { showErrorToast('Minimum 5 USDT required.'); return; }
     setIsProcessing(true);
     try {
-      const { timestamp, signature } = await signAdminAction('create_notice', account);
-      await api.post('/api/notices', {
-        address: account,
-        timestamp,
-        signature,
-        ...noticeForm,
-      });
-      showSuccessToast('Notice posted');
-      setNoticeForm({ title: '', image_url: '', link_url: '', content_html: '', is_active: true, priority: 0 });
-      refetchOffChain();
-    } catch (e) {
-      showErrorToast(e, 'Failed to post notice');
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const handleLoadAdminOverview = async () => {
-    if (!account || !onChainData || onChainData.role === 'user') return;
-    setIsProcessing(true);
-    try {
-      const { timestamp, signature } = await signAdminAction('admin_overview', account);
-      const { data } = await api.post('/api/admin/overview', {
-        address: account,
-        timestamp,
-        signature,
-      });
-      const totalUsers = data?.totals?.total_registered_users ?? 0;
-      const contractBalRaw = data?.totals?.contract_balance_raw ?? '0';
-      const decimals = Number((config as any).usdtDecimals ?? 18);
-      const pretty = Number(ethers.formatUnits(contractBalRaw, decimals)).toFixed(2);
-      setAdminOverview({ total_users: totalUsers, contract_balance: pretty });
-    } catch (e) {
-      showErrorToast(e, 'Failed to load overview');
-    } finally {
-      setIsProcessing(false);
-    }
+      const tx1 = await approveUSDT(miningAmount); if (tx1?.wait) await tx1.wait();
+      const tx2 = await buyMiner(miningAmount); if (tx2?.wait) await tx2.wait();
+      try { await api.post('/api/forms/mining/submit', { wallet_address: account, fields: { amount_usdt: amountNum, duration_days: 30, source: 'onchain' } }); } catch {}
+      showSuccessToast('Miner purchased on-chain'); setMiningAmount(''); refetchMining();
+    } catch (e) { showErrorToast(e, 'Failed to buy miner'); }
+    finally { setIsProcessing(false); }
   };
 
   return (
@@ -521,84 +353,34 @@ Timestamp: ${ts}`;
         </div>
 
         <div style={styles.grid}>
-          {/* Balance + Payout */}
           <div style={styles.card}>
             <h3 style={styles.cardTitle}>Available Balance</h3>
-            {isOnChainLoading ? (
-              <div style={{ height: 26, background: '#eef2f6', borderRadius: 8 }} />
-            ) : (
-              <div style={styles.balance}>${safeMoney(onChainData?.userBalance)}</div>
-            )}
+            {isOnChainLoading ? <div style={{ height: 26, background: '#eef2f6', borderRadius: 8 }} /> : <div style={styles.balance}>${safeMoney(onChainData?.userBalance)}</div>}
             <div style={styles.row}>
-              <button
-                style={styles.button}
-                disabled={isProcessing || isOnChainLoading}
-                onClick={onChainData?.role === 'user' ? handleUserPayout : handleAdminPayout}
-              >
+              <button style={styles.button} disabled={isProcessing || isOnChainLoading} onClick={onChainData?.role === 'user' ? handleUserPayout : handleAdminPayout}>
                 {onChainData?.role === 'user' ? 'Payout' : 'Withdraw Commission'}
               </button>
-              <button style={styles.buttonGhost} disabled={isOnChainLoading} onClick={() => refetchOnChain()}>
-                Refresh On‑chain
-              </button>
-              <button style={styles.buttonGhost} disabled={isOffChainLoading} onClick={() => refetchOffChain()}>
-                Refresh Data
-              </button>
             </div>
+            <div style={{ ...styles.small, marginTop: 6 }}>
+              Total Coin Balance: <strong>0.00</strong> — Withdrawal coming soon
+            </div>
+            {onChainData?.role !== 'user' && (
+              <div style={{ marginTop: 6, ...styles.small }}>
+                Contract: <strong>${safeMoney(onChainData?.contractBalance)}</strong> • Your Commission: <strong>${safeMoney(onChainData?.adminCommission)}</strong>
+              </div>
+            )}
+            {onChainData?.role === 'owner' && (
+              <div style={{ marginTop: 6 }}>
+                <button style={styles.buttonDanger} disabled={isProcessing} onClick={handleEmergencyWithdraw}>Emergency Withdraw All</button>
+              </div>
+            )}
             {!isOnChainLoading && !onChainData?.hasFundCode && (
               <div style={{ ...styles.small, color: colors.danger, marginTop: 4 }}>
                 Fund code not set. You must register with a fund code to withdraw.
               </div>
             )}
-            {onChainData?.role !== 'user' && (
-              <div style={{ marginTop: 6, ...styles.small }}>
-                Contract Balance: <strong>${safeMoney(onChainData?.contractBalance)}</strong> • Your Commission: <strong>${safeMoney(onChainData?.adminCommission)}</strong>
-              </div>
-            )}
-            {onChainData?.role === 'owner' && (
-              <div style={{ marginTop: 6 }}>
-                <button style={styles.buttonDanger} disabled={isProcessing} onClick={handleEmergencyWithdraw}>
-                  Emergency Withdraw All
-                </button>
-              </div>
-            )}
           </div>
 
-          {/* Stats + Actions */}
-          <div style={styles.card}>
-            <h3 style={styles.cardTitle}>Your Stats</h3>
-            <div style={styles.statRow}>
-              <div style={styles.statBox}>
-                <div style={styles.statLabel}>Total Refer</div>
-                <div style={styles.statValue}>
-                  {isOffChainLoading ? '...' : (offChainData?.referralStats?.total_referrals ?? 0)}
-                </div>
-              </div>
-              <div style={styles.statBox}>
-                <div style={styles.statLabel}>Total Login (days)</div>
-                <div style={styles.statValue}>
-                  {isOffChainLoading ? '...' : (offChainData?.logins?.total_login_days ?? 0)}
-                </div>
-              </div>
-            </div>
-            <div style={{ ...styles.row, marginTop: 8 }}>
-              <button style={styles.button} disabled={isProcessing || !account} onClick={handleMarkTodayLogin}>
-                Mark Today’s Login
-              </button>
-              <button style={styles.buttonGhost} disabled={isProcessing || !account} onClick={handleSyncFromChain}>
-                Sync Account (from chain)
-              </button>
-            </div>
-            {!isOffChainLoading && offChainData?.commissions && (
-              <>
-                <div style={styles.divider} />
-                <div style={styles.small}>
-                  Commission estimate — L1: {offChainData.commissions.percentages.l1}% • L2: {offChainData.commissions.percentages.l2}% • L3: {offChainData.commissions.percentages.l3}%
-                </div>
-              </>
-            )}
-          </div>
-
-          {/* Notice board */}
           <div style={styles.card}>
             <h3 style={styles.cardTitle}>Notice Board</h3>
             <div style={styles.noticeScroller}>
@@ -606,16 +388,10 @@ Timestamp: ${ts}`;
                 <div
                   key={n.id}
                   style={styles.noticeCard}
-                  onClick={() => {
-                    if (n.link_url) window.open(n.link_url, '_blank');
-                  }}
+                  onClick={() => { if (n.link_url) window.open(n.link_url, '_blank'); }}
                   title={n.title}
                 >
-                  {n.image_url ? (
-                    <img src={n.image_url} alt={n.title} style={styles.noticeImg as any} />
-                  ) : (
-                    <div style={styles.noticeImg as any} />
-                  )}
+                  {n.image_url ? <img src={n.image_url} alt={n.title} style={styles.noticeImg as any} /> : <div style={styles.noticeImg as any} />}
                   <div style={{ fontWeight: 900, marginBottom: 4 }}>{n.title}</div>
                   <div style={{ ...styles.small, ...styles.muted, marginBottom: 6 }}>{new Date(n.created_at).toLocaleString()}</div>
                   <div style={{ fontSize: 13, color: colors.navySoft, maxHeight: 120, overflow: 'auto' }}>
@@ -629,7 +405,41 @@ Timestamp: ${ts}`;
             </div>
           </div>
 
-          {/* Referral code + link */}
+          <div style={styles.card}>
+            <h3 style={styles.cardTitle}>Mining</h3>
+            <div style={styles.small}>
+              Buy a miner with USDT (min 5 USDT). Points will be calculated off‑chain. Funds are held on‑chain as a vault.
+            </div>
+            <div style={{ ...styles.row, marginTop: 6 }}>
+              <input style={styles.input} type="number" min={0} step="0.1" placeholder="Enter amount in USDT (min 5)" value={miningAmount} onChange={(e) => setMiningAmount(e.target.value)} />
+              <button className="buy-miner" style={styles.button} disabled={!canBuy || isProcessing} onClick={handleBuyMiner}>
+                Approve & Buy Miner
+              </button>
+            </div>
+            <div style={{ ...styles.small, marginTop: 6 }}>
+              Your Mining Stats: Miners <strong>{miningStats?.count ?? 0}</strong> • Total Deposited <strong>${safeMoney(miningStats?.totalDeposited)}</strong>
+            </div>
+          </div>
+
+          <div style={styles.card}>
+            <h3 style={styles.cardTitle}>Your Stats</h3>
+            <div style={styles.statRow}>
+              <div style={styles.statBox}><div style={styles.statLabel}>Total Refer</div><div style={styles.statValue}>{isOffChainLoading ? '...' : (offChainData?.referralStats?.total_referrals ?? 0)}</div></div>
+              <div style={styles.statBox}><div style={styles.statLabel}>Total Login (days)</div><div style={styles.statValue}>{isOffChainLoading ? '...' : (offChainData?.logins?.total_login_days ?? 0)}</div></div>
+            </div>
+            <div style={{ ...styles.row, marginTop: 8 }}>
+              <button style={styles.button} disabled={isProcessing || !account} onClick={handleMarkTodayLogin}>Mark Today’s Login</button>
+            </div>
+            {!isOffChainLoading && offChainData?.commissions && (
+              <>
+                <div style={styles.divider} />
+                <div style={styles.small}>
+                  Commission estimate — L1: {offChainData.commissions.percentages.l1}% • L2: {offChainData.commissions.percentages.l2}% • L3: {offChainData.commissions.percentages.l3}%
+                </div>
+              </>
+            )}
+          </div>
+
           <div style={styles.card}>
             <h3 style={styles.cardTitle}>Share & Earn</h3>
             <div style={{ marginBottom: 8 }}>
@@ -648,95 +458,259 @@ Timestamp: ${ts}`;
             </div>
           </div>
 
-          {/* Admin panel */}
-          {(onChainData?.role === 'admin' || onChainData?.role === 'owner') && (
-            <div style={styles.card}>
-              <h3 style={styles.cardTitle}>Admin Panel</h3>
+          <div style={styles.card}>
+            <h3 style={styles.cardTitle}>Your Referrals (Level 1)</h3>
+            {isRefsLoading ? (
+              <div style={{ ...styles.small, ...styles.muted }}>Loading...</div>
+            ) : referralList.length === 0 ? (
+              <div style={{ ...styles.small, ...styles.muted }}>No referrals yet.</div>
+            ) : (
+              <ul style={{ margin: 0, paddingLeft: 16 }}>
+                {referralList.map((id, idx) => <li key={`${id}-${idx}`} style={{ marginBottom: 4, fontSize: 14 }}>{id}</li>)}
+              </ul>
+            )}
+          </div>
 
-              <div style={styles.row}>
-                <button style={styles.buttonGhost} onClick={handleLoadAdminOverview} disabled={isProcessing}>
-                  Load Overview
-                </button>
-                <span style={{ ...styles.small, justifySelf: 'start' }}>
-                  {adminOverview
-                    ? `Users: ${adminOverview.total_users ?? 0} • Contract: $${adminOverview.contract_balance ?? '0.00'}`
-                    : '—'}
-                </span>
-              </div>
-
-              <div style={styles.divider} />
-
-              <div style={styles.row}>
-                <div>
-                  <div style={{ ...styles.small, marginBottom: 4 }}>Title</div>
-                  <input
-                    style={styles.input}
-                    value={noticeForm.title}
-                    onChange={(e) => setNoticeForm((s) => ({ ...s, title: e.target.value }))}
-                    placeholder="Enter title"
-                  />
-                </div>
-                <div>
-                  <div style={{ ...styles.small, marginBottom: 4 }}>Priority</div>
-                  <input
-                    type="number"
-                    style={styles.input}
-                    value={noticeForm.priority}
-                    onChange={(e) => setNoticeForm((s) => ({ ...s, priority: Number(e.target.value) || 0 }))}
-                    placeholder="0"
-                  />
-                </div>
-              </div>
-
-              <div style={styles.row}>
-                <div>
-                  <div style={{ ...styles.small, marginBottom: 4 }}>Image URL (optional)</div>
-                  <input
-                    style={styles.input}
-                    value={noticeForm.image_url}
-                    onChange={(e) => setNoticeForm((s) => ({ ...s, image_url: e.target.value }))}
-                    placeholder="https://..."
-                  />
-                </div>
-                <div>
-                  <div style={{ ...styles.small, marginBottom: 4 }}>Link URL (optional)</div>
-                  <input
-                    style={styles.input}
-                    value={noticeForm.link_url}
-                    onChange={(e) => setNoticeForm((s) => ({ ...s, link_url: e.target.value }))}
-                    placeholder="https://..."
-                  />
-                </div>
-              </div>
-
-              <div>
-                <div style={{ ...styles.small, marginBottom: 4 }}>
-                  Content HTML (supports scripts — use responsibly)
-                </div>
-                <textarea
-                  style={styles.textarea as any}
-                  value={noticeForm.content_html}
-                  onChange={(e) => setNoticeForm((s) => ({ ...s, content_html: e.target.value }))}
-                  placeholder="<div>Custom HTML here</div><script>console.log('Hi')</script>"
-                />
-              </div>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
-                  <input
-                    type="checkbox"
-                    checked={noticeForm.is_active}
-                    onChange={(e) => setNoticeForm((s) => ({ ...s, is_active: e.target.checked }))}
-                  />
-                  Active
-                </label>
-                <button style={styles.button} onClick={handleCreateNotice} disabled={isProcessing}>
-                  Post Notice
-                </button>
-              </div>
-            </div>
-          )}
+          {(onChainData?.role === 'admin' || onChainData?.role === 'owner') && <AdminPanel />}
         </div>
+      </div>
+    </div>
+  );
+};
+
+// ----------------- Admin Panel with Image/Text/Script options -----------------
+const AdminPanel: React.FC = () => {
+  const { account } = useWallet();
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  type NoticeType = 'image' | 'text' | 'script';
+  const [noticeType, setNoticeType] = useState<NoticeType>('image');
+
+  const [title, setTitle] = useState('');
+  const [priority, setPriority] = useState<number>(0);
+  const [isActive, setIsActive] = useState<boolean>(true);
+
+  // Image fields
+  const [imageUrl, setImageUrl] = useState('');
+  const [linkUrl, setLinkUrl] = useState('');
+  const [imagePreview, setImagePreview] = useState<string>('');
+
+  // Text/script fields
+  const [textContent, setTextContent] = useState('');
+  const [scriptContent, setScriptContent] = useState('');
+
+  const signAdminAction = async (purpose: string, address: string) => {
+    const provider = new BrowserProvider((window as any).ethereum);
+    const signer = await provider.getSigner();
+    const ts = Math.floor(Date.now() / 1000);
+    const message = `Admin action authorization
+Purpose: ${purpose}
+Address: ${ethers.getAddress(address)}
+Timestamp: ${ts}`;
+    const signature = await signer.signMessage(message);
+    return { timestamp: ts, signature };
+  };
+
+  const readFileAsDataURL = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload = () => resolve(String(fr.result || ''));
+      fr.onerror = reject;
+      fr.readAsDataURL(file);
+    });
+
+  const onPickImage = async (file?: File | null) => {
+    if (!file) return;
+    try {
+      const dataUrl = await readFileAsDataURL(file);
+      setImagePreview(dataUrl);
+      setImageUrl(dataUrl); // Store as data URL; optional: later move to CDN
+    } catch (e) {
+      showErrorToast(e, 'Failed to load image');
+    }
+  };
+
+  const wrapScriptIfNeeded = (code: string) => {
+    const trimmed = code.trim();
+    if (!trimmed) return '';
+    if (trimmed.toLowerCase().includes('<script')) return trimmed;
+    return `<script>\n${trimmed}\n</script>`;
+  };
+
+  const postNotice = async () => {
+    if (!account) return;
+
+    // Build payload according to type
+    let payload: any = {
+      address: account,
+      title: title.trim(),
+      is_active: isActive,
+      priority,
+    };
+
+    if (noticeType === 'image') {
+      if (!imageUrl) {
+        showErrorToast('Please provide an image (upload or URL)');
+        return;
+      }
+      payload.image_url = imageUrl;
+      payload.link_url = linkUrl || '';
+      payload.content_html = ''; // not used for image
+    } else if (noticeType === 'text') {
+      if (!textContent.trim()) {
+        showErrorToast('Please write some text');
+        return;
+      }
+      payload.image_url = '';
+      payload.link_url = '';
+      payload.content_html = textContent; // plain text/HTML
+    } else {
+      if (!scriptContent.trim()) {
+        showErrorToast('Please add script content');
+        return;
+      }
+      payload.image_url = '';
+      payload.link_url = '';
+      payload.content_html = wrapScriptIfNeeded(scriptContent);
+    }
+
+    setIsProcessing(true);
+    try {
+      const { timestamp, signature } = await signAdminAction('create_notice', account);
+      await api.post('/api/notices', { ...payload, timestamp, signature });
+      showSuccessToast('Notice posted');
+
+      // reset form
+      setTitle(''); setPriority(0); setIsActive(true);
+      setImageUrl(''); setLinkUrl(''); setImagePreview('');
+      setTextContent(''); setScriptContent('');
+    } catch (e) {
+      showErrorToast(e, 'Failed to post notice');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  return (
+    <div style={styles.card}>
+      <h3 style={styles.cardTitle}>Admin Panel</h3>
+
+      {/* Type switch */}
+      <div style={styles.tabRow as any}>
+        <button
+          style={{ ...styles.tabBtn, ...(noticeType === 'image' ? styles.tabBtnActive : {}) }}
+          onClick={() => setNoticeType('image')}
+        >
+          Image
+        </button>
+        <button
+          style={{ ...styles.tabBtn, ...(noticeType === 'text' ? styles.tabBtnActive : {}) }}
+          onClick={() => setNoticeType('text')}
+        >
+          Text
+        </button>
+        <button
+          style={{ ...styles.tabBtn, ...(noticeType === 'script' ? styles.tabBtnActive : {}) }}
+          onClick={() => setNoticeType('script')}
+        >
+          Script
+        </button>
+      </div>
+
+      {/* Common fields */}
+      <div style={{ ...styles.row, marginTop: 8 }}>
+        <div>
+          <div style={{ ...styles.small, marginBottom: 4 }}>Title</div>
+          <input style={styles.input} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Enter title" />
+        </div>
+        <div>
+          <div style={{ ...styles.small, marginBottom: 4 }}>Priority</div>
+          <input
+            type="number"
+            style={styles.input}
+            value={priority}
+            onChange={(e) => setPriority(Number(e.target.value) || 0)}
+            placeholder="0"
+          />
+        </div>
+      </div>
+
+      {/* Image mode */}
+      {noticeType === 'image' && (
+        <>
+          <div style={styles.row}>
+            <div>
+              <div style={{ ...styles.small, marginBottom: 4 }}>Upload from gallery</div>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => onPickImage(e.target.files?.[0] || null)}
+              />
+              {imagePreview && (
+                <div style={{ marginTop: 8 }}>
+                  <img src={imagePreview} alt="preview" style={styles.previewImg as any} />
+                </div>
+              )}
+            </div>
+            <div>
+              <div style={{ ...styles.small, marginBottom: 4 }}>Or Image URL</div>
+              <input style={styles.input} value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="https://..." />
+            </div>
+          </div>
+
+          <div style={{ marginTop: 6 }}>
+            <div style={{ ...styles.small, marginBottom: 4 }}>Link URL (optional)</div>
+            <input
+              style={styles.input}
+              value={linkUrl}
+              onChange={(e) => setLinkUrl(e.target.value)}
+              placeholder="https://... (opens on image click)"
+            />
+          </div>
+        </>
+      )}
+
+      {/* Text mode */}
+      {noticeType === 'text' && (
+        <div style={{ marginTop: 6 }}>
+          <div style={{ ...styles.small, marginBottom: 4 }}>Text content (plain text or simple HTML)</div>
+          <textarea
+            style={styles.textarea as any}
+            value={textContent}
+            onChange={(e) => setTextContent(e.target.value)}
+            placeholder="<p>Your message here</p>"
+          />
+        </div>
+      )}
+
+      {/* Script mode */}
+      {noticeType === 'script' && (
+        <div style={{ marginTop: 6 }}>
+          <div style={{ ...styles.small, marginBottom: 4 }}>
+            Script content (you can paste raw JS; we’ll auto wrap with &lt;script&gt; if missing)
+          </div>
+          <textarea
+            style={styles.textarea as any}
+            value={scriptContent}
+            onChange={(e) => setScriptContent(e.target.value)}
+            placeholder={`console.log('Hello from notice script');`}
+          />
+        </div>
+      )}
+
+      {/* Active + Post */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
+          <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} />
+          Active
+        </label>
+        <button style={styles.button} onClick={postNotice} disabled={isProcessing}>
+          Post Notice
+        </button>
+      </div>
+
+      <div style={{ ...styles.small, ...styles.muted, marginTop: 6 }}>
+        Note: Uploaded image is stored as data URL in DB for now. For production, consider a CDN (Cloudflare Images/R2) and use the Image URL field.
       </div>
     </div>
   );
