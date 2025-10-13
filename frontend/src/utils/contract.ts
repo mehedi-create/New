@@ -8,6 +8,7 @@ import {
 } from 'ethers';
 import { config } from '../config';
 
+// ERC20 (USDT) minimal ABI
 const ERC20_ABI = [
   'function approve(address spender, uint256 amount) returns (bool)',
   'function allowance(address owner, address spender) view returns (uint256)',
@@ -15,20 +16,26 @@ const ERC20_ABI = [
   'function decimals() view returns (uint8)',
 ];
 
+// CommunityPlatform ABI (unified contract)
 const PLATFORM_ABI = [
+  // core
   'function register(string _userId, string _referrerId, string _fundCode) external',
   'function withdrawWithFundCode(string _code) external',
-  'function withdrawCommission() external',
-  'function emergencyWithdrawAll() external',
+  'function withdrawCommission() external',          // owner-only
+  'function withdrawLiquidity(uint256 amount) external', // owner-only
+  'function emergencyWithdrawAll() external',        // owner-only
+  // mining (vault + counters)
+  'function buyMiner(uint256 amount) external returns (uint256)',
+  'function getUserMiningStats(address user) external view returns (uint256 count, uint256 totalDeposited)',
+  // views
   'function userBalances(address) view returns (uint256)',
-  'function hasSetFundCode(address) view returns (bool)',
-  'function getContractBalance() view returns (uint256)',
-  'function owner() view returns (address)',
-  'function admins(address) view returns (bool)',
   'function adminCommissions(address) view returns (uint256)',
-  'function registrationFee() view returns (uint256)',
+  'function getContractBalance() view returns (uint256)',
+  'function hasSetFundCode(address) view returns (bool)',
   'function isRegistered(address) view returns (bool)',
   'function addressToUserId(address) view returns (string)',
+  'function owner() view returns (address)',
+  'function admins(address) view returns (bool)',
 ];
 
 const USDT_DECIMALS = Number((config as any).usdtDecimals ?? 18);
@@ -36,7 +43,7 @@ const READ_RPC_URL = (config as any).readRpcUrl || '';
 const CONTRACT_ADDRESS = config.contractAddress;
 const USDT_ADDRESS = (config as any).usdtAddress;
 
-// Read provider (prefers dedicated RPC; falls back to injected wallet)
+// Read provider (RPC > injected)
 const getReadProvider = (): AbstractProvider => {
   if (READ_RPC_URL) return new JsonRpcProvider(READ_RPC_URL);
   if (typeof window !== 'undefined' && (window as any).ethereum) {
@@ -59,7 +66,7 @@ const getPlatformContractWrite = async () => {
   return new Contract(CONTRACT_ADDRESS, PLATFORM_ABI, signer);
 };
 
-// Messages for signed auth
+// Auth message (for backend sync/login)
 export const buildAuthMessage = (address: string, timestamp: number) =>
   `I authorize the backend to sync my on-chain profile.\nAddress: ${ethers.getAddress(address)}\nTimestamp: ${timestamp}`;
 
@@ -71,7 +78,7 @@ export const signAuthMessage = async (address: string) => {
   return { message: msg, timestamp: ts, signature };
 };
 
-// Read helpers
+// -------- Read helpers --------
 export const isRegistered = async (address: string): Promise<boolean> => {
   const contract = getPlatformContractRead();
   return contract.isRegistered(address);
@@ -115,7 +122,23 @@ export const hasSetFundCode = async (address: string): Promise<boolean> => {
   return contract.hasSetFundCode(address);
 };
 
-// Write helpers
+// Mining (read)
+export const getUserMiningStatsRaw = async (address: string): Promise<{ count: bigint; totalDeposited: bigint }> => {
+  const contract = getPlatformContractRead();
+  const [count, totalDeposited] = await contract.getUserMiningStats(address);
+  // Ethers v6 returns BigInt for uint256
+  return { count: BigInt(count), totalDeposited: BigInt(totalDeposited) };
+};
+
+export const getUserMiningStats = async (address: string): Promise<{ count: number; totalDeposited: string }> => {
+  const raw = await getUserMiningStatsRaw(address);
+  return {
+    count: Number(raw.count),
+    totalDeposited: ethers.formatUnits(raw.totalDeposited, USDT_DECIMALS),
+  };
+};
+
+// -------- Write helpers --------
 export const approveUSDT = async (amount: string) => {
   const signer = await getSigner();
   const usdt = new Contract(USDT_ADDRESS, ERC20_ABI, signer);
@@ -139,10 +162,23 @@ export const withdrawWithFundCode = async (code: string) => {
 
 export const withdrawCommission = async () => {
   const contract = await getPlatformContractWrite();
-  return contract.withdrawCommission();
+  return contract.withdrawCommission(); // owner only
+};
+
+export const withdrawLiquidity = async (amount: string) => {
+  const contract = await getPlatformContractWrite();
+  const amt = ethers.parseUnits(amount, USDT_DECIMALS);
+  return contract.withdrawLiquidity(amt); // owner only
 };
 
 export const emergencyWithdrawAll = async () => {
   const contract = await getPlatformContractWrite();
-  return contract.emergencyWithdrawAll();
+  return contract.emergencyWithdrawAll(); // owner only
+};
+
+// Mining (write)
+export const buyMiner = async (amount: string) => {
+  const contract = await getPlatformContractWrite();
+  const amt = ethers.parseUnits(amount, USDT_DECIMALS);
+  return contract.buyMiner(amt);
 };
