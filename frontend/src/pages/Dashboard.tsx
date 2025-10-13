@@ -65,32 +65,31 @@ const colors = {
   deepNavy: '#0b1b3b',
   navySoft: '#163057',
   accent: '#14b8a6',
-  accentDark: '#0e9c8c',
-  white: '#ffffff',
   danger: '#b91c1c',
+  white: '#ffffff',
   grayLine: 'rgba(11,27,59,0.10)',
 };
 
-const styles = {
+const styles: Record<string, React.CSSProperties & Record<string, any>> = {
   page: {
     minHeight: '100vh',
     width: '100%',
     background: `linear-gradient(180deg, ${colors.bgLightGreen} 0%, ${colors.bgLightGreen2} 100%)`,
     color: colors.deepNavy,
-    userSelect: 'none' as const,
+    userSelect: 'none',
   },
   container: {
-    maxWidth: 1200,
+    maxWidth: 640,
     margin: '0 auto',
-    padding: '20px 14px 40px',
+    padding: '16px 12px 32px',
   },
   topBar: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 12,
-    marginBottom: 16,
-    flexWrap: 'wrap' as const,
+    gap: 8,
+    marginBottom: 12,
+    flexWrap: 'wrap',
   },
   brand: {
     fontWeight: 900,
@@ -100,11 +99,11 @@ const styles = {
   userBox: {
     display: 'flex',
     alignItems: 'center',
-    gap: 10,
+    gap: 8,
   },
   avatar: {
-    width: 36,
-    height: 36,
+    width: 34,
+    height: 34,
     borderRadius: '50%',
     background: 'rgba(11,27,59,0.12)',
     display: 'grid',
@@ -114,31 +113,28 @@ const styles = {
   logoutBtn: {
     height: 36,
     padding: '0 12px',
-    borderRadius: 12,
+    borderRadius: 10,
     border: '1px solid rgba(11,27,59,0.15)',
-    background: 'rgba(255,255,255,0.6)',
+    background: 'rgba(255,255,255,0.7)',
     cursor: 'pointer',
     fontWeight: 700,
   },
   grid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
-    gap: 14,
+    gridTemplateColumns: '1fr',
+    gap: 12,
     alignItems: 'stretch',
   },
   card: {
-    background: 'rgba(255,255,255,0.6)',
+    background: 'rgba(255,255,255,0.7)',
     border: `1px solid ${colors.grayLine}`,
-    borderRadius: 16,
-    padding: 16,
-    minHeight: 160,
-    boxShadow: '0 12px 24px rgba(11,27,59,0.06)',
+    borderRadius: 14,
+    padding: 14,
+    minHeight: 140,
+    boxShadow: '0 8px 18px rgba(11,27,59,0.06)',
     display: 'flex',
-    flexDirection: 'column' as const,
-    gap: 10,
-  },
-  cardTall: {
-    minHeight: 220,
+    flexDirection: 'column',
+    gap: 8,
   },
   cardTitle: {
     margin: '0 0 6px 0',
@@ -147,15 +143,15 @@ const styles = {
   },
   statRow: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
-    gap: 10,
+    gridTemplateColumns: '1fr',
+    gap: 8,
   },
   statBox: {
-    background: 'rgba(255,255,255,0.7)',
+    background: 'rgba(255,255,255,0.85)',
     border: `1px solid ${colors.grayLine}`,
-    borderRadius: 14,
-    padding: 12,
-    textAlign: 'center' as const,
+    borderRadius: 12,
+    padding: 10,
+    textAlign: 'center',
   },
   statLabel: {
     fontSize: 12,
@@ -166,52 +162,55 @@ const styles = {
     fontWeight: 900,
   },
   balance: {
-    fontSize: 28,
+    fontSize: 26,
     fontWeight: 900,
-    margin: '6px 0 6px',
+    margin: '4px 0 6px',
   },
   button: {
     height: 44,
-    borderRadius: 12,
+    borderRadius: 10,
     background: colors.accent,
     color: colors.white,
     border: 'none',
     fontSize: 14,
     fontWeight: 800,
     cursor: 'pointer',
-    padding: '0 14px',
+    padding: '0 12px',
+    width: '100%',
   },
   buttonGhost: {
     height: 44,
-    borderRadius: 12,
+    borderRadius: 10,
     background: 'transparent',
     color: colors.deepNavy,
     border: `1px solid ${colors.grayLine}`,
     fontSize: 14,
     fontWeight: 800,
     cursor: 'pointer',
-    padding: '0 14px',
+    padding: '0 12px',
+    width: '100%',
   },
   buttonDanger: {
     height: 44,
-    borderRadius: 12,
+    borderRadius: 10,
     background: colors.danger,
     color: colors.white,
     border: 'none',
     fontSize: 14,
     fontWeight: 800,
     cursor: 'pointer',
-    padding: '0 14px',
+    padding: '0 12px',
+    width: '100%',
   },
   row: {
-    display: 'flex',
-    gap: 10,
-    flexWrap: 'wrap' as const,
+    display: 'grid',
+    gridTemplateColumns: '1fr',
+    gap: 8,
     width: '100%',
   },
   input: {
     height: 44,
-    borderRadius: 12,
+    borderRadius: 10,
     border: `1px solid ${colors.grayLine}`,
     padding: '0 12px',
     background: colors.white,
@@ -222,25 +221,24 @@ const styles = {
   },
   copyWrap: {
     display: 'grid',
-    gridTemplateColumns: '1fr auto',
+    gridTemplateColumns: '1fr',
     gap: 8,
     alignItems: 'center',
   },
   noticeScroller: {
     display: 'flex',
-    gap: 12,
-    overflowX: 'auto' as const,
+    gap: 10,
+    overflowX: 'auto',
     paddingBottom: 6,
-    scrollSnapType: 'x mandatory' as any, // mobile-friendly horizontal scroll snapping
-    // Removed WebkitOverflowScrolling to avoid TS type error
+    scrollSnapType: 'x mandatory' as any,
   },
   noticeCard: {
-    minWidth: 280,
-    maxWidth: 360,
-    background: 'rgba(255,255,255,0.85)',
+    minWidth: '92%',
+    maxWidth: '92%',
+    background: 'rgba(255,255,255,0.9)',
     border: `1px solid ${colors.grayLine}`,
-    borderRadius: 14,
-    padding: 12,
+    borderRadius: 12,
+    padding: 10,
     flex: '0 0 auto',
     cursor: 'pointer',
     scrollSnapAlign: 'start',
@@ -250,21 +248,15 @@ const styles = {
     height: 140,
     objectFit: 'cover' as const,
     borderRadius: 10,
-    marginBottom: 10,
+    marginBottom: 8,
     background: '#f2f5f7',
   },
   small: { fontSize: 12, color: colors.navySoft },
   muted: { opacity: 0.8 },
-  adminPanel: {
-    marginTop: 6,
-    display: 'grid',
-    gridTemplateColumns: '1fr',
-    gap: 10,
-  },
   textarea: {
     minHeight: 120,
-    borderRadius: 12,
-    padding: 12,
+    borderRadius: 10,
+    padding: 10,
     border: `1px solid ${colors.grayLine}`,
     fontFamily: 'monospace',
     fontSize: 13,
@@ -276,22 +268,11 @@ const styles = {
   divider: {
     height: 1,
     background: colors.grayLine,
-    margin: '8px 0',
+    margin: '6px 0',
   },
-} satisfies Record<string, React.CSSProperties | any>;
-
-const useIsMobile = (bp = 768) => {
-  const [isMobile, setIsMobile] = useState<boolean>(() =>
-    typeof window !== 'undefined' ? window.innerWidth < bp : false
-  );
-  useEffect(() => {
-    const onResize = () => setIsMobile(window.innerWidth < bp);
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, [bp]);
-  return isMobile;
 };
 
+// Execute script tags inside dynamic HTML content (admin notices)
 const DangerousHtml: React.FC<{ html: string }> = ({ html }) => {
   const ref = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -311,11 +292,11 @@ const DangerousHtml: React.FC<{ html: string }> = ({ html }) => {
 };
 
 const Dashboard: React.FC = () => {
-  const isMobile = useIsMobile();
   const { account, userId, disconnect } = useWallet();
   const queryClient = useQueryClient();
   const [isProcessing, setIsProcessing] = useState(false);
 
+  // Block copy/select/context menu on this page
   useEffect(() => {
     const prevent = (e: Event) => e.preventDefault();
     document.addEventListener('copy', prevent);
@@ -344,6 +325,7 @@ const Dashboard: React.FC = () => {
       let role: Role = 'user';
       if (account.toLowerCase() === owner.toLowerCase()) role = 'owner';
       else if (adminFlag) role = 'admin';
+
       const data: OnChainData = { userBalance: balance, hasFundCode: hasCode, role };
       if (role !== 'user') {
         const [contractBal, adminComm] = await Promise.all([getContractBalance(), getAdminCommission(account)]);
@@ -365,6 +347,7 @@ const Dashboard: React.FC = () => {
 
   const referralCode = useMemo(() => (userId || offChainData?.userId || '').toUpperCase(), [userId, offChainData?.userId]);
   const referralLink = useMemo(() => `${window.location.origin}/register?ref=${referralCode}`, [referralCode]);
+  const initials = (referralCode || 'U').slice(0, 2).toUpperCase();
 
   const safeMoney = (val?: string) => {
     const n = parseFloat(val || '0');
@@ -457,6 +440,7 @@ const Dashboard: React.FC = () => {
     }
   };
 
+  // Admin notice form state
   const [noticeForm, setNoticeForm] = useState({
     title: '',
     image_url: '',
@@ -487,7 +471,12 @@ Timestamp: ${ts}`;
     setIsProcessing(true);
     try {
       const { timestamp, signature } = await signAdminAction('create_notice', account);
-      await api.post('/api/notices', { address: account, timestamp, signature, ...noticeForm });
+      await api.post('/api/notices', {
+        address: account,
+        timestamp,
+        signature,
+        ...noticeForm,
+      });
       showSuccessToast('Notice posted');
       setNoticeForm({ title: '', image_url: '', link_url: '', content_html: '', is_active: true, priority: 0 });
       refetchOffChain();
@@ -503,7 +492,11 @@ Timestamp: ${ts}`;
     setIsProcessing(true);
     try {
       const { timestamp, signature } = await signAdminAction('admin_overview', account);
-      const { data } = await api.post('/api/admin/overview', { address: account, timestamp, signature });
+      const { data } = await api.post('/api/admin/overview', {
+        address: account,
+        timestamp,
+        signature,
+      });
       const totalUsers = data?.totals?.total_registered_users ?? 0;
       const contractBalRaw = data?.totals?.contract_balance_raw ?? '0';
       const decimals = Number((config as any).usdtDecimals ?? 18);
@@ -516,15 +509,6 @@ Timestamp: ${ts}`;
     }
   };
 
-  const referralCode = useMemo(() => (userId || offChainData?.userId || '').toUpperCase(), [userId, offChainData?.userId]);
-  const referralLink = useMemo(() => `${window.location.origin}/register?ref=${referralCode}`, [referralCode]);
-  const initials = (referralCode || 'U').slice(0, 2).toUpperCase();
-
-  const isMobile = useIsMobile();
-  const btnFull = isMobile ? { width: '100%' } : {};
-  const copyGrid = isMobile ? { gridTemplateColumns: '1fr' } : {};
-  const noticeCardSize = isMobile ? { minWidth: '86%', maxWidth: '86%' } : {};
-
   return (
     <div style={styles.page}>
       <div style={styles.container}>
@@ -532,55 +516,55 @@ Timestamp: ${ts}`;
           <div style={styles.brand}>Web3 Community</div>
           <div style={styles.userBox}>
             <div style={styles.avatar}>{initials}</div>
-            <button style={{ ...styles.logoutBtn, ...(isMobile ? { width: 100 } : {}) }} onClick={() => { disconnect(); }}>
-              Logout
-            </button>
+            <button style={styles.logoutBtn} onClick={() => { disconnect(); }}>Logout</button>
           </div>
         </div>
 
-        <div style={styles.grid as any}>
-          <div style={{ ...styles.card, ...styles.cardTall }}>
+        <div style={styles.grid}>
+          {/* Balance + Payout */}
+          <div style={styles.card}>
             <h3 style={styles.cardTitle}>Available Balance</h3>
             {isOnChainLoading ? (
-              <div style={{ height: 28, background: '#eef2f6', borderRadius: 8 }} />
+              <div style={{ height: 26, background: '#eef2f6', borderRadius: 8 }} />
             ) : (
               <div style={styles.balance}>${safeMoney(onChainData?.userBalance)}</div>
             )}
             <div style={styles.row}>
               <button
-                style={{ ...styles.button, ...btnFull }}
+                style={styles.button}
                 disabled={isProcessing || isOnChainLoading}
                 onClick={onChainData?.role === 'user' ? handleUserPayout : handleAdminPayout}
               >
                 {onChainData?.role === 'user' ? 'Payout' : 'Withdraw Commission'}
               </button>
-              <button style={{ ...styles.buttonGhost, ...btnFull }} disabled={isOnChainLoading} onClick={() => refetchOnChain()}>
+              <button style={styles.buttonGhost} disabled={isOnChainLoading} onClick={() => refetchOnChain()}>
                 Refresh On‑chain
               </button>
-              <button style={{ ...styles.buttonGhost, ...btnFull }} disabled={isOffChainLoading} onClick={() => refetchOffChain()}>
+              <button style={styles.buttonGhost} disabled={isOffChainLoading} onClick={() => refetchOffChain()}>
                 Refresh Data
               </button>
             </div>
             {!isOnChainLoading && !onChainData?.hasFundCode && (
-              <div style={{ ...styles.small, color: colors.danger, marginTop: 6 }}>
+              <div style={{ ...styles.small, color: colors.danger, marginTop: 4 }}>
                 Fund code not set. You must register with a fund code to withdraw.
               </div>
             )}
             {onChainData?.role !== 'user' && (
-              <div style={{ marginTop: 8, ...styles.small }}>
+              <div style={{ marginTop: 6, ...styles.small }}>
                 Contract Balance: <strong>${safeMoney(onChainData?.contractBalance)}</strong> • Your Commission: <strong>${safeMoney(onChainData?.adminCommission)}</strong>
               </div>
             )}
             {onChainData?.role === 'owner' && (
-              <div style={{ marginTop: 8 }}>
-                <button style={{ ...styles.buttonDanger, ...btnFull }} disabled={isProcessing} onClick={handleEmergencyWithdraw}>
+              <div style={{ marginTop: 6 }}>
+                <button style={styles.buttonDanger} disabled={isProcessing} onClick={handleEmergencyWithdraw}>
                   Emergency Withdraw All
                 </button>
               </div>
             )}
           </div>
 
-          <div style={{ ...styles.card, ...styles.cardTall }}>
+          {/* Stats + Actions */}
+          <div style={styles.card}>
             <h3 style={styles.cardTitle}>Your Stats</h3>
             <div style={styles.statRow}>
               <div style={styles.statBox}>
@@ -596,11 +580,11 @@ Timestamp: ${ts}`;
                 </div>
               </div>
             </div>
-            <div style={{ ...styles.row, marginTop: 10 }}>
-              <button style={{ ...styles.button, ...btnFull }} disabled={isProcessing || !account} onClick={handleMarkTodayLogin}>
+            <div style={{ ...styles.row, marginTop: 8 }}>
+              <button style={styles.button} disabled={isProcessing || !account} onClick={handleMarkTodayLogin}>
                 Mark Today’s Login
               </button>
-              <button style={{ ...styles.buttonGhost, ...btnFull }} disabled={isProcessing || !account} onClick={handleSyncFromChain}>
+              <button style={styles.buttonGhost} disabled={isProcessing || !account} onClick={handleSyncFromChain}>
                 Sync Account (from chain)
               </button>
             </div>
@@ -614,13 +598,14 @@ Timestamp: ${ts}`;
             )}
           </div>
 
-          <div style={{ ...styles.card }}>
+          {/* Notice board */}
+          <div style={styles.card}>
             <h3 style={styles.cardTitle}>Notice Board</h3>
             <div style={styles.noticeScroller}>
               {(offChainData?.notices ?? []).map((n) => (
                 <div
                   key={n.id}
-                  style={{ ...styles.noticeCard, ...noticeCardSize }}
+                  style={styles.noticeCard}
                   onClick={() => {
                     if (n.link_url) window.open(n.link_url, '_blank');
                   }}
@@ -631,7 +616,7 @@ Timestamp: ${ts}`;
                   ) : (
                     <div style={styles.noticeImg as any} />
                   )}
-                  <div style={{ fontWeight: 900, marginBottom: 6 }}>{n.title}</div>
+                  <div style={{ fontWeight: 900, marginBottom: 4 }}>{n.title}</div>
                   <div style={{ ...styles.small, ...styles.muted, marginBottom: 6 }}>{new Date(n.created_at).toLocaleString()}</div>
                   <div style={{ fontSize: 13, color: colors.navySoft, maxHeight: 120, overflow: 'auto' }}>
                     <DangerousHtml html={n.content_html} />
@@ -644,110 +629,110 @@ Timestamp: ${ts}`;
             </div>
           </div>
 
-          <div style={{ ...styles.card }}>
+          {/* Referral code + link */}
+          <div style={styles.card}>
             <h3 style={styles.cardTitle}>Share & Earn</h3>
-            <div style={{ marginBottom: 10 }}>
-              <div style={{ ...styles.small, marginBottom: 6 }}>Referral Code</div>
-              <div style={{ ...(styles.copyWrap as any), ...(copyGrid as any) }}>
+            <div style={{ marginBottom: 8 }}>
+              <div style={{ ...styles.small, marginBottom: 4 }}>Referral Code</div>
+              <div style={styles.copyWrap}>
                 <input style={styles.input} readOnly value={referralCode || ''} />
-                <button style={{ ...styles.button, ...btnFull }} onClick={() => copyToClipboard(referralCode)}>Copy</button>
+                <button style={styles.button} onClick={() => copyToClipboard(referralCode)}>Copy</button>
               </div>
             </div>
             <div>
-              <div style={{ ...styles.small, marginBottom: 6 }}>Referral Link</div>
-              <div style={{ ...(styles.copyWrap as any), ...(copyGrid as any) }}>
+              <div style={{ ...styles.small, marginBottom: 4 }}>Referral Link</div>
+              <div style={styles.copyWrap}>
                 <input style={styles.input} readOnly value={referralLink} />
-                <button style={{ ...styles.button, ...btnFull }} onClick={() => copyToClipboard(referralLink)}>Copy</button>
+                <button style={styles.button} onClick={() => copyToClipboard(referralLink)}>Copy</button>
               </div>
             </div>
           </div>
 
+          {/* Admin panel */}
           {(onChainData?.role === 'admin' || onChainData?.role === 'owner') && (
-            <div style={{ ...styles.card, gridColumn: '1 / -1' }}>
+            <div style={styles.card}>
               <h3 style={styles.cardTitle}>Admin Panel</h3>
 
-              <div style={styles.adminPanel as any}>
-                <div style={styles.row}>
-                  <button style={{ ...styles.buttonGhost, ...btnFull }} onClick={handleLoadAdminOverview} disabled={isProcessing}>
-                    Load Overview
-                  </button>
-                  <span style={{ ...styles.small, alignSelf: 'center' }}>
-                    {adminOverview
-                      ? `Users: ${adminOverview.total_users ?? 0} • Contract: $${adminOverview.contract_balance ?? '0.00'}`
-                      : '—'}
-                  </span>
-                </div>
+              <div style={styles.row}>
+                <button style={styles.buttonGhost} onClick={handleLoadAdminOverview} disabled={isProcessing}>
+                  Load Overview
+                </button>
+                <span style={{ ...styles.small, justifySelf: 'start' }}>
+                  {adminOverview
+                    ? `Users: ${adminOverview.total_users ?? 0} • Contract: $${adminOverview.contract_balance ?? '0.00'}`
+                    : '—'}
+                </span>
+              </div>
 
-                <div style={styles.divider} />
+              <div style={styles.divider} />
 
-                <div style={styles.row}>
-                  <div style={{ flex: 1, minWidth: 220 }}>
-                    <div style={{ ...styles.small, marginBottom: 6 }}>Title</div>
-                    <input
-                      style={styles.input}
-                      value={noticeForm.title}
-                      onChange={(e) => setNoticeForm((s) => ({ ...s, title: e.target.value }))}
-                      placeholder="Enter title"
-                    />
-                  </div>
-                  <div style={{ width: 140, minWidth: 120 }}>
-                    <div style={{ ...styles.small, marginBottom: 6 }}>Priority</div>
-                    <input
-                      type="number"
-                      style={styles.input}
-                      value={noticeForm.priority}
-                      onChange={(e) => setNoticeForm((s) => ({ ...s, priority: Number(e.target.value) || 0 }))}
-                      placeholder="0"
-                    />
-                  </div>
-                </div>
-
-                <div style={styles.row}>
-                  <div style={{ flex: 1, minWidth: 220 }}>
-                    <div style={{ ...styles.small, marginBottom: 6 }}>Image URL (optional)</div>
-                    <input
-                      style={styles.input}
-                      value={noticeForm.image_url}
-                      onChange={(e) => setNoticeForm((s) => ({ ...s, image_url: e.target.value }))}
-                      placeholder="https://..."
-                    />
-                  </div>
-                  <div style={{ flex: 1, minWidth: 220 }}>
-                    <div style={{ ...styles.small, marginBottom: 6 }}>Link URL (optional)</div>
-                    <input
-                      style={styles.input}
-                      value={noticeForm.link_url}
-                      onChange={(e) => setNoticeForm((s) => ({ ...s, link_url: e.target.value }))}
-                      placeholder="https://..."
-                    />
-                  </div>
-                </div>
-
+              <div style={styles.row}>
                 <div>
-                  <div style={{ ...styles.small, marginBottom: 6 }}>
-                    Content HTML (supports scripts — use responsibly)
-                  </div>
-                  <textarea
-                    style={styles.textarea as any}
-                    value={noticeForm.content_html}
-                    onChange={(e) => setNoticeForm((s) => ({ ...s, content_html: e.target.value }))}
-                    placeholder="<div>Custom HTML here</div><script>console.log('Hi')</script>"
+                  <div style={{ ...styles.small, marginBottom: 4 }}>Title</div>
+                  <input
+                    style={styles.input}
+                    value={noticeForm.title}
+                    onChange={(e) => setNoticeForm((s) => ({ ...s, title: e.target.value }))}
+                    placeholder="Enter title"
                   />
                 </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
-                    <input
-                      type="checkbox"
-                      checked={noticeForm.is_active}
-                      onChange={(e) => setNoticeForm((s) => ({ ...s, is_active: e.target.checked }))}
-                    />
-                    Active
-                  </label>
-                  <button style={{ ...styles.button, ...btnFull }} onClick={handleCreateNotice} disabled={isProcessing}>
-                    Post Notice
-                  </button>
+                <div>
+                  <div style={{ ...styles.small, marginBottom: 4 }}>Priority</div>
+                  <input
+                    type="number"
+                    style={styles.input}
+                    value={noticeForm.priority}
+                    onChange={(e) => setNoticeForm((s) => ({ ...s, priority: Number(e.target.value) || 0 }))}
+                    placeholder="0"
+                  />
                 </div>
+              </div>
+
+              <div style={styles.row}>
+                <div>
+                  <div style={{ ...styles.small, marginBottom: 4 }}>Image URL (optional)</div>
+                  <input
+                    style={styles.input}
+                    value={noticeForm.image_url}
+                    onChange={(e) => setNoticeForm((s) => ({ ...s, image_url: e.target.value }))}
+                    placeholder="https://..."
+                  />
+                </div>
+                <div>
+                  <div style={{ ...styles.small, marginBottom: 4 }}>Link URL (optional)</div>
+                  <input
+                    style={styles.input}
+                    value={noticeForm.link_url}
+                    onChange={(e) => setNoticeForm((s) => ({ ...s, link_url: e.target.value }))}
+                    placeholder="https://..."
+                  />
+                </div>
+              </div>
+
+              <div>
+                <div style={{ ...styles.small, marginBottom: 4 }}>
+                  Content HTML (supports scripts — use responsibly)
+                </div>
+                <textarea
+                  style={styles.textarea as any}
+                  value={noticeForm.content_html}
+                  onChange={(e) => setNoticeForm((s) => ({ ...s, content_html: e.target.value }))}
+                  placeholder="<div>Custom HTML here</div><script>console.log('Hi')</script>"
+                />
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
+                  <input
+                    type="checkbox"
+                    checked={noticeForm.is_active}
+                    onChange={(e) => setNoticeForm((s) => ({ ...s, is_active: e.target.checked }))}
+                  />
+                  Active
+                </label>
+                <button style={styles.button} onClick={handleCreateNotice} disabled={isProcessing}>
+                  Post Notice
+                </button>
               </div>
             </div>
           )}
