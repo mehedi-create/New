@@ -1,4 +1,4 @@
-// BACKEND/src/index.ts
+// backed/src/index.ts
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import {
@@ -21,32 +21,31 @@ type Bindings = {
 
 const app = new Hono<{ Bindings: Bindings }>()
 
-// ---------- CORS (improved) ----------
+// In-memory guards (best-effort)
+const inflightUpsert = new Set<string>()
+const lastUpsertAt = new Map<string, number>()
+
+// ---------- CORS ----------
 app.use('/*', async (c, next) => {
   const allowed = (c.env.ALLOWED_ORIGINS || '')
     .split(',')
     .map((s) => s.trim())
-    .filter(Boolean)
-
-  const dynamicCors = cors({
+  return cors({
     origin: (origin) => {
-      if (!origin) return allowed[0] || '*' // e.g. curl/no-origin
+      if (!origin) return allowed[0] || '*'
       return allowed.includes(origin) ? origin : allowed[0] || '*'
     },
     allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowHeaders: ['Content-Type', 'Authorization'],
     maxAge: 86400,
-  })
-
-  return dynamicCors(c, next)
+  })(c, next)
 })
 
-// ---------- Error/NotFound helpers ----------
+// ---------- Error/NotFound ----------
 app.onError((err, c) => {
   console.error('Unhandled error:', err)
   return c.json({ error: 'Server error' }, 500)
 })
-
 app.notFound((c) => {
   const path = new URL(c.req.url).pathname
   return c.json({ ok: false, error: 'NOT_FOUND', path }, 404)
@@ -103,7 +102,6 @@ async function ensureSchema(db: D1Database) {
   ]
   await db.batch(stmts.map((sql) => db.prepare(sql)))
 
-  // Try to add missing columns (ignore if already exist)
   try {
     await db.prepare(`ALTER TABLE notices ADD COLUMN kind TEXT DEFAULT 'text'`).run()
   } catch {}
@@ -117,7 +115,7 @@ app.use('*', async (c, next) => {
   await next()
 })
 
-// ---------- Contract ABI (CommunityPlatform minimal) ----------
+// ---------- Contract ABI ----------
 const PLATFORM_ABI = [
   'function isRegistered(address) view returns (bool)',
   'function addressToUserId(address) view returns (string)',
@@ -130,7 +128,6 @@ const PLATFORM_ABI = [
   'event UserRegistered(address indexed user, string userId, address indexed referrer)',
   'event MinerPurchased(address indexed user, uint256 amount, uint256 startTime, uint256 endTime)',
 ]
-
 const iface = new Interface(PLATFORM_ABI)
 const USER_REGISTERED_TOPIC0 = ethers.id('UserRegistered(address,string,address)')
 
@@ -139,7 +136,6 @@ function getProvider(env: Bindings): JsonRpcProvider {
   if (!url) throw new Error('BSC_RPC_URL is not configured')
   return new JsonRpcProvider(url)
 }
-
 function getContract(env: Bindings, provider: JsonRpcProvider) {
   return new Contract(env.CONTRACT_ADDRESS, PLATFORM_ABI, provider)
 }
@@ -149,14 +145,12 @@ function buildUserAuthMessage(address: string, timestamp: number) {
 Address: ${ethers.getAddress(address)}
 Timestamp: ${timestamp}`
 }
-
 function buildAdminAuthMessage(purpose: string, address: string, timestamp: number) {
   return `Admin action authorization
 Purpose: ${purpose}
 Address: ${ethers.getAddress(address)}
 Timestamp: ${timestamp}`
 }
-
 async function verifySignedMessage(expectedAddress: string, message: string, signature: string) {
   let recovered: string
   try {
@@ -168,7 +162,6 @@ async function verifySignedMessage(expectedAddress: string, message: string, sig
     throw new Error('Signature does not match address')
   }
 }
-
 async function requireOwner(env: Bindings, address: string) {
   const provider = getProvider(env)
   const contract = getContract(env, provider)
@@ -179,35 +172,48 @@ async function requireOwner(env: Bindings, address: string) {
   return owner
 }
 
+// Light-weight: avoid heavy full-chain scans
 async function getRegistrationLogForUser(env: Bindings, address: string) {
   const provider = getProvider(env)
-  const fromBlock = Number(env.START_BLOCK || 0)
-  const paddedUser = zeroPadValue(ethers.getAddress(address), 32)
 
-  const logs = await provider.getLogs({
-    address: env.CONTRACT_ADDRESS,
-    fromBlock,
-    toBlock: 'latest',
-    topics: [USER_REGISTERED_TOPIC0, paddedUser],
-  })
+  // If deploy start not configured (or "0"), skip scanning to avoid timeouts
+  const startCfg = Number(env.START_BLOCK || 0)
+  if (!startCfg) return null
 
-  if (!logs || logs.length === 0) return null
-
-  const lg = logs[0]
-  const block = await provider.getBlock(lg.blockNumber)
-  let userIdFromEvent: string | undefined
-  let referrerFromEvent: string | undefined
   try {
-    const parsed = iface.parseLog(lg)
-    userIdFromEvent = parsed?.args?.userId
-    referrerFromEvent = parsed?.args?.referrer
-  } catch {}
-  return {
-    txHash: lg.transactionHash,
-    blockNumber: lg.blockNumber,
-    timestamp: block?.timestamp ? Number(block.timestamp) : undefined,
-    userIdFromEvent,
-    referrerFromEvent,
+    const latest = await provider.getBlockNumber()
+    // Limit scan range to reduce load (max ~200k blocks)
+    const fromBlock = Math.max(startCfg, latest - 200_000)
+    const paddedUser = zeroPadValue(ethers.getAddress(address), 32)
+
+    const logs = await provider.getLogs({
+      address: env.CONTRACT_ADDRESS,
+      fromBlock,
+      toBlock: 'latest',
+      topics: [USER_REGISTERED_TOPIC0, paddedUser],
+    })
+
+    if (!logs || logs.length === 0) return null
+
+    const lg = logs[0]
+    const block = await provider.getBlock(lg.blockNumber)
+    let userIdFromEvent: string | undefined
+    let referrerFromEvent: string | undefined
+    try {
+      const parsed = iface.parseLog(lg)
+      userIdFromEvent = parsed?.args?.userId
+      referrerFromEvent = parsed?.args?.referrer
+    } catch {}
+    return {
+      txHash: lg.transactionHash,
+      blockNumber: lg.blockNumber,
+      timestamp: block?.timestamp ? Number(block.timestamp) : undefined,
+      userIdFromEvent,
+      referrerFromEvent,
+    }
+  } catch (err) {
+    console.warn('getRegistrationLogForUser skipped:', (err as any)?.message || err)
+    return null
   }
 }
 
@@ -295,7 +301,6 @@ function todayISODate() {
 function safeFormKey(key: string) {
   return key.toLowerCase().replace(/[^a-z0-9_]/g, '_').slice(0, 48)
 }
-
 async function ensureDynamicFormTable(db: D1Database, key: string) {
   const table = `form_${safeFormKey(key)}`
   const sql = `CREATE TABLE IF NOT EXISTS ${table} (
@@ -310,7 +315,7 @@ async function ensureDynamicFormTable(db: D1Database, key: string) {
 
 // ---------- API Routes ----------
 
-// Health check
+// Health
 app.get('/api/health', (c) => c.json({ ok: true, time: Date.now() }))
 
 // Bootstrap user status (chain + db)
@@ -350,7 +355,7 @@ app.get('/api/users/:address', async (c) => {
   }
 })
 
-// Sync user from chain (signed)
+// Sync user from chain (signed) — with light rate-limit
 app.post('/api/users/upsert-from-chain', async (c) => {
   try {
     const body = await c.req.json<{ address: string; timestamp: number; signature: string }>()
@@ -359,16 +364,29 @@ app.post('/api/users/upsert-from-chain', async (c) => {
     if (!ethers.isAddress(address)) return c.json({ error: 'Invalid wallet address' }, 400)
     if (!timestamp || !signature) return c.json({ error: 'Missing timestamp/signature' }, 400)
 
-    const now = Math.floor(Date.now() / 1000)
-    if (Math.abs(now - Number(timestamp)) > 300) {
+    const nowSec = Math.floor(Date.now() / 1000)
+    if (Math.abs(nowSec - Number(timestamp)) > 300) {
       return c.json({ error: 'Signature expired, please try again.' }, 400)
     }
+
+    // Rate-limit per address (best-effort)
+    const key = address.toLowerCase()
+    const now = Date.now()
+    const last = lastUpsertAt.get(key) || 0
+    if (now - last < 5000) {
+      return c.json({ error: 'Please wait a few seconds before trying again.' }, 429)
+    }
+    if (inflightUpsert.has(key)) {
+      return c.json({ error: 'Sync already in progress. Please wait.' }, 409)
+    }
+    inflightUpsert.add(key)
 
     const message = buildUserAuthMessage(address, Number(timestamp))
     await verifySignedMessage(address, message, signature)
 
     const onChain = await readUserFromChain(c.env, address)
     if (!onChain.isRegistered) {
+      inflightUpsert.delete(key)
       return c.json({ error: 'Address is not registered on-chain' }, 400)
     }
 
@@ -382,13 +400,15 @@ app.post('/api/users/upsert-from-chain', async (c) => {
       createdAtISO: onChain.registeredAt ? new Date(onChain.registeredAt * 1000).toISOString() : undefined,
     })
 
-    // If user didn't exist before, award referrer
+    // Award referrer only if it’s a new insert (avoid abuse)
     if (!dbUserBefore && onChain.referrerId && onChain.referrerId.length > 0) {
       await c.env.DB.prepare('UPDATE users SET coin_balance = coin_balance + 5 WHERE user_id = ?')
         .bind(onChain.referrerId.toUpperCase())
         .run()
     }
 
+    lastUpsertAt.set(key, now)
+    inflightUpsert.delete(key)
     return c.json({ ok: true })
   } catch (e: any) {
     console.error('POST /api/users/upsert-from-chain error:', e.stack || e.message)
@@ -406,8 +426,8 @@ app.post('/api/users/:address/login', async (c) => {
     const { timestamp, signature } = body || ({} as any)
 
     if (!timestamp || !signature) return c.json({ error: 'Missing timestamp/signature' }, 400)
-    const now = Math.floor(Date.now() / 1000)
-    if (Math.abs(now - Number(timestamp)) > 300) return c.json({ error: 'Signature expired' }, 400)
+    const nowSec = Math.floor(Date.now() / 1000)
+    if (Math.abs(nowSec - Number(timestamp)) > 300) return c.json({ error: 'Signature expired' }, 400)
 
     const message = buildUserAuthMessage(address, Number(timestamp))
     await verifySignedMessage(address, message, signature)
@@ -423,13 +443,12 @@ app.post('/api/users/:address/login', async (c) => {
 
     if (!results || results.length === 0) {
       await c.env.DB.batch([
-        c.env.DB.prepare('INSERT INTO logins (wallet_address, login_date) VALUES (?, ?)').bind(
-          lower,
-          loginDate
-        ),
-        c.env.DB.prepare('UPDATE users SET coin_balance = coin_balance + 1 WHERE wallet_address = ?').bind(
-          lower
-        ),
+        c.env.DB
+          .prepare('INSERT INTO logins (wallet_address, login_date) VALUES (?, ?)')
+          .bind(lower, loginDate),
+        c.env.DB
+          .prepare('UPDATE users SET coin_balance = coin_balance + 1 WHERE wallet_address = ?')
+          .bind(lower),
       ])
     }
 
@@ -444,7 +463,7 @@ app.post('/api/users/:address/login', async (c) => {
   }
 })
 
-// Dashboard data
+// Dashboard data with fallback auto-upsert
 app.get('/api/dashboard/:walletAddress', async (c) => {
   const { walletAddress } = c.req.param()
   if (!ethers.isAddress(walletAddress)) {
@@ -455,15 +474,40 @@ app.get('/api/dashboard/:walletAddress', async (c) => {
     const db = c.env.DB
     const lower = walletAddress.toLowerCase()
 
-    const user = await db
+    let user = await db
       .prepare('SELECT user_id, coin_balance FROM users WHERE wallet_address = ?')
       .bind(lower)
       .first<{ user_id: string; coin_balance: number }>()
+
+    // Fallback: not in DB → read chain → if registered, upsert (no coin award here)
+    if (!user) {
+      try {
+        const onChain = await readUserFromChain(c.env, walletAddress)
+        if (onChain.isRegistered && onChain.userId) {
+          await upsertDbUser(db, {
+            walletAddress,
+            userId: onChain.userId,
+            referrerId: onChain.referrerId || '',
+            txHash: onChain.registeredTxHash,
+            createdAtISO: onChain.registeredAt
+              ? new Date(onChain.registeredAt * 1000).toISOString()
+              : undefined,
+          })
+          user = await db
+            .prepare('SELECT user_id, coin_balance FROM users WHERE wallet_address = ?')
+            .bind(lower)
+            .first<{ user_id: string; coin_balance: number }>()
+        }
+      } catch (e) {
+        console.warn('Dashboard fallback upsert failed:', (e as any)?.message || e)
+      }
+    }
+
     if (!user) return c.json({ error: 'User not found' }, 404)
 
     const userId = user.user_id
 
-    // Level 1 referrals
+    // Level 1
     const level1 = await db
       .prepare('SELECT user_id FROM users WHERE referrer_id = ? ORDER BY created_at DESC')
       .bind(userId)
@@ -503,15 +547,14 @@ app.get('/api/dashboard/:walletAddress', async (c) => {
       .first<{ cnt: number }>()
     const totalLoginDays = loginRow?.cnt || 0
 
-    // Commission breakdown estimate (based on current registration fee)
+    // Commission estimate
     const provider = getProvider(c.env)
     const contract = getContract(c.env, provider)
     const feeRaw: bigint = BigInt(await contract.registrationFee())
 
-    const l1TotalRaw = (feeRaw * 40n) / 100n * BigInt(level1Count)
-    const l2TotalRaw = (feeRaw * 20n) / 100n * BigInt(level2Count)
-    const l3TotalRaw = (feeRaw * 10n) / 100n * BigInt(level3Count)
-    const commissionEstimateRaw = (l1TotalRaw + l2TotalRaw + l3TotalRaw).toString()
+    const l1TotalRaw = ((feeRaw * 40n) / 100n) * BigInt(level1Count)
+    const l2TotalRaw = ((feeRaw * 20n) / 100n) * BigInt(level2Count)
+    const l3TotalRaw = ((feeRaw * 10n) / 100n) * BigInt(level3Count)
 
     // Notices (active, top 10)
     const noticesRes = await db
@@ -529,7 +572,7 @@ app.get('/api/dashboard/:walletAddress', async (c) => {
         created_at: string
       }>()
 
-    // Mining stats off-chain from form_mining (dynamic table)
+    // Mining stats from dynamic table (if exists)
     let minerCount = 0
     let totalDeposited = 0
     try {
@@ -560,7 +603,7 @@ app.get('/api/dashboard/:walletAddress', async (c) => {
         level2_count: level2Count,
         level3_count: level3Count,
       },
-      level1_list: level1Ids, // for frontend referral list fallback
+      level1_list: level1Ids,
       logins: {
         total_login_days: totalLoginDays,
       },
@@ -569,7 +612,7 @@ app.get('/api/dashboard/:walletAddress', async (c) => {
         l1_total_raw: l1TotalRaw.toString(),
         l2_total_raw: l2TotalRaw.toString(),
         l3_total_raw: l3TotalRaw.toString(),
-        total_estimated_raw: commissionEstimateRaw,
+        total_estimated_raw: (l1TotalRaw + l2TotalRaw + l3TotalRaw).toString(),
         percentages: { l1: 40, l2: 20, l3: 10 },
       },
       notices: (noticesRes.results || []).map((n) => ({
@@ -584,7 +627,7 @@ app.get('/api/dashboard/:walletAddress', async (c) => {
       })),
       miningStats: {
         miner_count: minerCount,
-        total_deposited: totalDeposited, // USDT (number)
+        total_deposited: totalDeposited,
       },
       earningHistory: [],
     })
@@ -670,8 +713,8 @@ app.post('/api/notices', async (c) => {
     const { address, timestamp, signature } = body || ({} as any)
     if (!ethers.isAddress(address)) return c.json({ error: 'Invalid address' }, 400)
     if (!timestamp || !signature) return c.json({ error: 'Missing auth params' }, 400)
-    const now = Math.floor(Date.now() / 1000)
-    if (Math.abs(now - Number(timestamp)) > 300)
+    const nowSec = Math.floor(Date.now() / 1000)
+    if (Math.abs(nowSec - Number(timestamp)) > 300)
       return c.json({ error: 'Signature expired' }, 400)
 
     const msg = buildAdminAuthMessage('create_notice', address, Number(timestamp))
@@ -689,7 +732,8 @@ app.post('/api/notices', async (c) => {
 
     const image_url = kind === 'image' ? body.image_url || '' : ''
     const link_url = kind === 'image' ? body.link_url || '' : ''
-    const content_html = kind === 'text' ? body.content_html || '' : kind === 'script' ? body.content_html || '' : ''
+    const content_html =
+      kind === 'text' ? body.content_html || '' : kind === 'script' ? body.content_html || '' : ''
 
     await c.env.DB.prepare(
       `INSERT INTO notices (title, content_html, image_url, link_url, kind, is_active, priority, created_at)
@@ -724,8 +768,8 @@ app.patch('/api/notices/:id', async (c) => {
     const { address, timestamp, signature } = body || ({} as any)
     if (!ethers.isAddress(address)) return c.json({ error: 'Invalid address' }, 400)
     if (!timestamp || !signature) return c.json({ error: 'Missing auth params' }, 400)
-    const now = Math.floor(Date.now() / 1000)
-    if (Math.abs(now - Number(timestamp)) > 300)
+    const nowSec = Math.floor(Date.now() / 1000)
+    if (Math.abs(nowSec - Number(timestamp)) > 300)
       return c.json({ error: 'Signature expired' }, 400)
 
     const msg = buildAdminAuthMessage('update_notice', address, Number(timestamp))
@@ -743,7 +787,6 @@ app.patch('/api/notices/:id', async (c) => {
     if (typeof body.kind === 'string' && ['image', 'text', 'script'].includes(body.kind)) {
       fields.push('kind = ?'); values.push(body.kind)
     }
-
     fields.push('updated_at = ?'); values.push(new Date().toISOString())
 
     if (fields.length === 0) return c.json({ error: 'No fields to update' }, 400)
@@ -759,7 +802,7 @@ app.patch('/api/notices/:id', async (c) => {
   }
 })
 
-// ---------- Dynamic form submissions (auto-table) ----------
+// ---------- Dynamic form submissions ----------
 app.post('/api/forms/:formKey/submit', async (c) => {
   try {
     const { formKey } = c.req.param()
@@ -782,15 +825,15 @@ app.post('/api/forms/:formKey/submit', async (c) => {
   }
 })
 
-// ---------- Admin overview (owner only, signed) ----------
+// ---------- Admin overview ----------
 app.post('/api/admin/overview', async (c) => {
   try {
     const body = await c.req.json<{ address: string; timestamp: number; signature: string }>()
     const { address, timestamp, signature } = body || ({} as any)
     if (!ethers.isAddress(address)) return c.json({ error: 'Invalid address' }, 400)
     if (!timestamp || !signature) return c.json({ error: 'Missing auth params' }, 400)
-    const now = Math.floor(Date.now() / 1000)
-    if (Math.abs(now - Number(timestamp)) > 300) return c.json({ error: 'Signature expired' }, 400)
+    const nowSec = Math.floor(Date.now() / 1000)
+    if (Math.abs(nowSec - Number(timestamp)) > 300) return c.json({ error: 'Signature expired' }, 400)
 
     const msg = buildAdminAuthMessage('admin_overview', address, Number(timestamp))
     await verifySignedMessage(address, msg, signature)
