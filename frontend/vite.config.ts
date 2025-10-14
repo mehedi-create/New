@@ -1,28 +1,20 @@
 // frontend/vite.config.ts
-import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
+import { defineConfig } from 'vite'
 
 export default defineConfig({
-  plugins: [react()],
   server: {
-    host: true,
     port: 5173,
-    strictPort: true,
-    open: false,
+    host: true,
   },
   preview: {
-    port: 5174,
-    strictPort: true,
+    port: 5173,
+    host: true,
   },
   build: {
-    target: 'es2020',
-    outDir: 'dist',
-    sourcemap: true,
+    target: 'es2022',
+    sourcemap: false,
   },
-  css: {
-    devSourcemap: true,
+  optimizeDeps: {
+    include: ['ethers', 'axios', 'react', 'react-dom', 'react-router-dom'],
   },
-  define: {
-    'process.env': {}, // avoid process undefined errors in some libs
-  },
-});
+})
