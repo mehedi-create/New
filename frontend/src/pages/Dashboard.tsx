@@ -19,10 +19,9 @@ import {
   getUserMiningStats,
 } from '../utils/contract'
 import { showSuccessToast, showErrorToast } from '../utils/notification'
-import { config } from '../config'
 import { api, getDashboardData, getUserBootstrap, upsertUserFromChain } from '../services/api'
-import { ethers, BrowserProvider } from 'ethers'
 import { isValidAddress } from '../utils/wallet'
+import { ethers, BrowserProvider } from 'ethers'
 
 type Role = 'user' | 'admin' | 'owner'
 
@@ -168,6 +167,38 @@ const styles: Record<string, React.CSSProperties & Record<string, any>> = {
   previewImg: {
     width: '100%', maxHeight: 200, objectFit: 'cover' as const, borderRadius: 10, border: `1px solid ${colors.grayLine}`,
   },
+
+  // Modal
+  overlay: {
+    position: 'fixed',
+    inset: 0,
+    background: 'rgba(0,0,0,0.35)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1000,
+    padding: 12,
+  },
+  modal: {
+    width: '100%',
+    maxWidth: 460,
+    background: '#fff',
+    borderRadius: 14,
+    border: `1px solid ${colors.grayLine}`,
+    boxShadow: '0 12px 28px rgba(11,27,59,0.12)',
+    padding: 16,
+    color: colors.deepNavy,
+  },
+  stepRow: {
+    display: 'grid',
+    gridTemplateColumns: '24px 1fr',
+    gap: 8,
+    alignItems: 'start',
+  },
+  stepDot: (bg: string): React.CSSProperties => ({
+    width: 12, height: 12, marginTop: 4,
+    borderRadius: '50%', background: bg,
+  }),
 }
 
 const DangerousHtml: React.FC<{ html: string }> = ({ html }) => {
@@ -186,13 +217,26 @@ const DangerousHtml: React.FC<{ html: string }> = ({ html }) => {
   return <div ref={ref} />
 }
 
+// small helper
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
 const Dashboard: React.FC = () => {
   const { account, userId, disconnect } = useWallet()
   const queryClient = useQueryClient()
   const [isProcessing, setIsProcessing] = useState(false)
 
-  // New: bootstrap gate so dashboard data only fetches after upsert-if-needed
-  const [isBootstrapped, setIsBootstrapped] = useState(false)
+  // Modal: step-by-step "Sign your data" sync
+  const [showSignModal, setShowSignModal] = useState(false)
+  const [syncInProgress, setSyncInProgress] = useState(false)
+  const [lastSyncAt, setLastSyncAt] = useState<number>(0)
+  const [syncError, setSyncError] = useState<string>('')
+
+  type StepStatus = 'idle' | 'running' | 'done' | 'error'
+  const [steps, setSteps] = useState<{ sign: StepStatus; submit: StepStatus; verify: StepStatus }>({
+    sign: 'idle',
+    submit: 'idle',
+    verify: 'idle',
+  })
 
   // Prevent copy/select/context menu
   useEffect(() => {
@@ -209,30 +253,19 @@ const Dashboard: React.FC = () => {
     }
   }, [])
 
-  // Bootstrap + auto-sync off-chain if needed (before dashboard queries)
+  // Reset modal state on account change
   useEffect(() => {
-    setIsBootstrapped(false)
-    if (!isValidAddress(account)) return
-    ;(async () => {
-      try {
-        const { data } = await getUserBootstrap(account!)
-        if (data?.action === 'await_backend_sync') {
-          const { timestamp, signature } = await signAuthMessage(account!)
-          await upsertUserFromChain(account!, timestamp, signature)
-          await queryClient.invalidateQueries({ queryKey: ['offChainData', account] })
-        }
-      } catch {
-        // Ignore bootstrap errors; dashboard queries stay disabled if no account
-      } finally {
-        setIsBootstrapped(true)
-      }
-    })()
-  }, [account, queryClient])
+    setShowSignModal(false)
+    setSyncInProgress(false)
+    setSyncError('')
+    setSteps({ sign: 'idle', submit: 'idle', verify: 'idle' })
+  }, [account])
 
+  // On-chain data
   const { data: onChainData, isLoading: isOnChainLoading } = useQuery<OnChainData | null>({
     queryKey: ['onChainData', account],
     enabled: isValidAddress(account),
-    refetchInterval: 15000,
+    refetchInterval: 30000,
     retry: 1,
     queryFn: async () => {
       if (!isValidAddress(account)) return null
@@ -255,31 +288,34 @@ const Dashboard: React.FC = () => {
     },
   })
 
+  // Off-chain dashboard data
   const {
     data: offChainData,
     isLoading: isOffChainLoading,
     refetch: refetchOffChain,
-  } = useQuery<OffChainData>({
+  } = useQuery<OffChainData | null>({
     queryKey: ['offChainData', account],
-    enabled: isBootstrapped && isValidAddress(account),
-    refetchInterval: 15000,
-    retry: 0, // avoid spamming 404 before bootstrap
+    enabled: isValidAddress(account),
+    retry: false, // no auto-retry to avoid load; we'll control via modal
     refetchOnWindowFocus: false,
     queryFn: async () => {
-      const res = await getDashboardData(account!)
-      return res.data as OffChainData
+      if (!isValidAddress(account)) return null
+      try {
+        const res = await getDashboardData(account!)
+        return res.data as OffChainData
+      } catch (err: any) {
+        const status = err?.response?.status || err?.status
+        if (status === 404) {
+          // DB-তে ইউজার নেই → modal দেখান
+          setShowSignModal(true)
+          return null
+        }
+        throw err
+      }
     },
   })
 
-  const { data: miningStats, refetch: refetchMining } = useQuery<{ count: number; totalDeposited: string }>({
-    queryKey: ['miningStats', account],
-    enabled: isValidAddress(account),
-    queryFn: async () => {
-      if (!isValidAddress(account)) return { count: 0, totalDeposited: '0.00' }
-      return getUserMiningStats(account!)
-    },
-  })
-
+  // Level-1 referral list
   const { data: referralList = [], isLoading: isRefsLoading } = useQuery<string[]>({
     queryKey: ['referrals', account],
     enabled: isValidAddress(account),
@@ -314,6 +350,84 @@ const Dashboard: React.FC = () => {
     showSuccessToast('Copied to clipboard')
   }
 
+  // ---------------- Step-by-step Sign & Sync (modal) ----------------
+  const startSignAndSync = async () => {
+    setSyncError('')
+    if (!isValidAddress(account)) {
+      setSyncError('Wallet not connected')
+      return
+    }
+    const now = Date.now()
+    if (now - lastSyncAt < 5000) {
+      setSyncError('Please wait a few seconds before trying again.')
+      return
+    }
+    if (syncInProgress) return
+
+    setSyncInProgress(true)
+    setSteps({ sign: 'running', submit: 'idle', verify: 'idle' })
+
+    try {
+      // 1) Sign message
+      const { timestamp, signature } = await signAuthMessage(account!)
+      setSteps((s) => ({ ...s, sign: 'done', submit: 'running' }))
+      await sleep(300) // small pacing
+
+      // 2) Submit upsert (backend has rate-limit too)
+      await upsertUserFromChain(account!, timestamp, signature)
+      setSteps((s) => ({ ...s, submit: 'done', verify: 'running' }))
+
+      // 3) Verify: poll bootstrap (max 3 tries, exponential backoff)
+      let ok = false
+      const delays = [800, 1600, 2600]
+      for (let i = 0; i < delays.length; i++) {
+        await sleep(delays[i])
+        try {
+          const { data } = await getUserBootstrap(account!)
+          if (data?.action === 'redirect_dashboard') {
+            ok = true
+            break
+          }
+        } catch {}
+      }
+      if (!ok) {
+        // last attempt: light refetch dashboard once
+        try {
+          await refetchOffChain()
+          ok = true
+        } catch {}
+      }
+
+      if (!ok) {
+        setSteps((s) => ({ ...s, verify: 'error' }))
+        setSyncError('Sync completed but verification failed. Please try again in a moment.')
+        return
+      }
+
+      setSteps((s) => ({ ...s, verify: 'done' }))
+      setLastSyncAt(Date.now())
+
+      // Refresh queries gently
+      await queryClient.invalidateQueries({ queryKey: ['offChainData', account] })
+      await queryClient.invalidateQueries({ queryKey: ['referrals', account] })
+
+      // Close modal after a short delay
+      await sleep(400)
+      setShowSignModal(false)
+      showSuccessToast('Your data has been synced successfully.')
+    } catch (e) {
+      setSteps((s) => ({
+        ...s,
+        sign: s.sign === 'running' ? 'error' : s.sign,
+        submit: s.submit === 'running' ? 'error' : s.submit,
+      }))
+      setSyncError(typeof (e as any)?.message === 'string' ? (e as any).message : 'Sync failed')
+    } finally {
+      setSyncInProgress(false)
+    }
+  }
+
+  // ---------------- Handlers ----------------
   const handleUserPayout = async () => {
     if (!onChainData?.hasFundCode) {
       showErrorToast('Fund code not set. Please register with a fund code.')
@@ -400,7 +514,8 @@ const Dashboard: React.FC = () => {
       } catch {}
       showSuccessToast('Miner purchased on-chain')
       setMiningAmount('')
-      refetchMining()
+      // refresh any mining-related cache
+      queryClient.invalidateQueries({ queryKey: ['miningStats', account] })
     } catch (e) {
       showErrorToast(e, 'Failed to buy miner')
     } finally {
@@ -408,8 +523,89 @@ const Dashboard: React.FC = () => {
     }
   }
 
+  // --------------- UI ---------------
+  const renderSignModal = () => {
+    if (!showSignModal) return null
+    const dot = (s: StepStatus) =>
+      s === 'done' ? '#16a34a' : s === 'running' ? '#f59e0b' : s === 'error' ? '#b91c1c' : '#9ca3af'
+
+    return (
+      <div style={styles.overlay}>
+        <div style={styles.modal}>
+          <h3 style={{ margin: '0 0 8px 0', fontWeight: 900 }}>Sign your data</h3>
+          <p style={{ margin: '0 0 10px 0', fontSize: 13, color: colors.navySoft }}>
+            We couldn’t find your profile in the database. To sync it from the blockchain, please
+            sign a message and let us update your profile securely.
+          </p>
+
+          <div style={{ display: 'grid', gap: 8, marginTop: 8 }}>
+            <div style={styles.stepRow}>
+              <div style={styles.stepDot(dot(steps.sign))} />
+              <div>
+                <div style={{ fontWeight: 800 }}>Step 1 — Sign authorization message</div>
+                <div style={{ fontSize: 12, color: colors.navySoft }}>
+                  We request a simple message signature (free, no gas).
+                </div>
+              </div>
+            </div>
+            <div style={styles.stepRow}>
+              <div style={styles.stepDot(dot(steps.submit))} />
+              <div>
+                <div style={{ fontWeight: 800 }}>Step 2 — Send to server</div>
+                <div style={{ fontSize: 12, color: colors.navySoft }}>
+                  Your signed message lets us fetch on‑chain data and upsert your profile.
+                </div>
+              </div>
+            </div>
+            <div style={styles.stepRow}>
+              <div style={styles.stepDot(dot(steps.verify))} />
+              <div>
+                <div style={{ fontWeight: 800 }}>Step 3 — Verify & finish</div>
+                <div style={{ fontSize: 12, color: colors.navySoft }}>
+                  We’ll verify and refresh the dashboard automatically.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {!!syncError && (
+            <div style={{ marginTop: 10, color: colors.danger, fontSize: 13, fontWeight: 700 }}>
+              {syncError}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+            <button
+              style={{ ...styles.button, flex: 1 }}
+              onClick={startSignAndSync}
+              disabled={syncInProgress || !isValidAddress(account)}
+            >
+              {syncInProgress ? 'Syncing…' : 'Sign & Sync'}
+            </button>
+            <button
+              style={{ ...styles.buttonGhost, flex: 1 }}
+              onClick={() => {
+                if (!syncInProgress) setShowSignModal(false)
+              }}
+              disabled={syncInProgress}
+            >
+              Cancel
+            </button>
+          </div>
+
+          <div style={{ marginTop: 8, fontSize: 12, color: colors.navySoft }}>
+            Tip: If it doesn’t complete at once, please try again after a few seconds. We avoid
+            sending too many requests at once to keep the network stable.
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div style={styles.page}>
+      {renderSignModal()}
+
       <div style={styles.container}>
         <div style={styles.topBar}>
           <div style={styles.brand}>Web3 Community</div>
@@ -539,10 +735,7 @@ const Dashboard: React.FC = () => {
                 Approve & Buy Miner
               </button>
             </div>
-            <div style={{ ...styles.small, marginTop: 6 }}>
-              Your Mining Stats: Miners <strong>{miningStats?.count ?? 0}</strong> • Total Deposited{' '}
-              <strong>${safeMoney(miningStats?.totalDeposited)}</strong>
-            </div>
+            <MiningStats account={account} />
           </div>
 
           <div style={styles.card}>
@@ -570,7 +763,7 @@ const Dashboard: React.FC = () => {
                 Mark Today’s Login
               </button>
             </div>
-            {!isOffChainLoading && offChainData?.commissions && (
+            {!!offChainData?.commissions && (
               <>
                 <div style={styles.divider} />
                 <div style={styles.small}>
@@ -607,6 +800,29 @@ const Dashboard: React.FC = () => {
           {(onChainData?.role === 'admin' || onChainData?.role === 'owner') && <AdminPanel />}
         </div>
       </div>
+    </div>
+  )
+}
+
+const MiningStats: React.FC<{ account: string | null }> = ({ account }) => {
+  const { data: miningStats } = useQuery<{ count: number; totalDeposited: string }>({
+    queryKey: ['miningStats', account],
+    enabled: isValidAddress(account),
+    refetchInterval: 60000,
+    queryFn: async () => {
+      if (!isValidAddress(account)) return { count: 0, totalDeposited: '0.00' }
+      return getUserMiningStats(account!)
+    },
+  })
+  const safeMoney = (val?: string) => {
+    const n = parseFloat(val || '0')
+    if (isNaN(n)) return '0.00'
+    return n.toFixed(2)
+  }
+  return (
+    <div style={{ ...styles.small, marginTop: 6 }}>
+      Your Mining Stats: Miners <strong>{miningStats?.count ?? 0}</strong> • Total Deposited{' '}
+      <strong>${safeMoney(miningStats?.totalDeposited)}</strong>
     </div>
   )
 }
