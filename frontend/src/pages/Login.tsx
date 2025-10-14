@@ -1,10 +1,11 @@
 // frontend/src/pages/Login.tsx
-import React, { useEffect, useMemo, useState } from 'react';
-import { useWallet } from '../context/WalletContext';
-import { isRegistered } from '../utils/contract';
-import { useNavigate } from 'react-router-dom';
+import React, { useEffect, useMemo, useState } from 'react'
+import { useWallet } from '../context/WalletContext'
+import { isRegistered } from '../utils/contract'
+import { useNavigate } from 'react-router-dom'
+import { isValidAddress } from '../utils/wallet'
 
-type Phase = 'idle' | 'connecting' | 'checking';
+type Phase = 'idle' | 'connecting' | 'checking'
 
 const colors = {
   bgLightGreen: '#e8f9f1',
@@ -13,7 +14,7 @@ const colors = {
   accent: '#14b8a6',
   accentDark: '#0e9c8c',
   white: '#ffffff',
-};
+}
 
 const styles = {
   page: {
@@ -31,9 +32,7 @@ const styles = {
     maxWidth: 980,
     padding: '56px 24px',
   },
-  hero: {
-    textAlign: 'center' as const,
-  },
+  hero: { textAlign: 'center' as const },
   badge: {
     display: 'inline-flex',
     alignItems: 'center',
@@ -79,77 +78,71 @@ const styles = {
     transition: 'all 0.2s ease',
     minWidth: 220,
   },
-  buttonDisabled: {
-    opacity: 0.7,
-    cursor: 'not-allowed',
-  },
-  hint: {
-    fontSize: 13,
-    opacity: 0.85,
-  },
-} satisfies Record<string, React.CSSProperties | any>;
+  buttonDisabled: { opacity: 0.7, cursor: 'not-allowed' },
+  hint: { fontSize: 13, opacity: 0.85 },
+} satisfies Record<string, React.CSSProperties | any>
 
 const Login: React.FC = () => {
-  const navigate = useNavigate();
-  const { connect, isConnecting, account } = useWallet();
-  const [phase, setPhase] = useState<Phase>('idle');
-  const [error, setError] = useState<string>('');
+  const navigate = useNavigate()
+  const { connect, isConnecting, account } = useWallet()
+  const [phase, setPhase] = useState<Phase>('idle')
+  const [error, setError] = useState<string>('')
 
   const buttonLabel = useMemo(() => {
-    if (phase === 'connecting') return 'Connecting...';
-    if (phase === 'checking') return 'Checking status...';
-    return 'Connect Wallet';
-  }, [phase]);
+    if (phase === 'connecting') return 'Connecting...'
+    if (phase === 'checking') return 'Checking status...'
+    return 'Connect Wallet'
+  }, [phase])
 
-  // Block copy/select/context menu on this page
+  // Block copy/select/context menu on this page (optional)
   useEffect(() => {
-    const prevent = (e: Event) => e.preventDefault();
-    document.addEventListener('copy', prevent);
-    document.addEventListener('cut', prevent);
-    document.addEventListener('contextmenu', prevent);
-    document.addEventListener('selectstart', prevent);
+    const prevent = (e: Event) => e.preventDefault()
+    document.addEventListener('copy', prevent)
+    document.addEventListener('cut', prevent)
+    document.addEventListener('contextmenu', prevent)
+    document.addEventListener('selectstart', prevent)
     return () => {
-      document.removeEventListener('copy', prevent);
-      document.removeEventListener('cut', prevent);
-      document.removeEventListener('contextmenu', prevent);
-      document.removeEventListener('selectstart', prevent);
-    };
-  }, []);
+      document.removeEventListener('copy', prevent)
+      document.removeEventListener('cut', prevent)
+      document.removeEventListener('contextmenu', prevent)
+      document.removeEventListener('selectstart', prevent)
+    }
+  }, [])
 
   const waitForAccount = async (timeoutMs = 8000): Promise<string | null> => {
-    const start = Date.now();
+    const start = Date.now()
     while (Date.now() - start < timeoutMs) {
-      if (account) return account;
-      await new Promise((r) => setTimeout(r, 120));
+      if (isValidAddress(account)) return account!
+      await new Promise((r) => setTimeout(r, 120))
     }
-    return null;
-  };
+    return null
+  }
 
   const handleConnect = async () => {
-    if (phase !== 'idle' || isConnecting) return;
-    setError('');
+    if (phase !== 'idle' || isConnecting) return
+    setError('')
     try {
-      setPhase('connecting');
-      await connect();
+      setPhase('connecting')
+      await connect()
 
-      const addr = await waitForAccount();
+      const addr = await waitForAccount()
       if (!addr) {
-        setPhase('idle');
-        setError('Wallet address not detected. Please try again.');
-        return;
+        setPhase('idle')
+        setError('Wallet address not detected. Please try again.')
+        return
       }
 
-      setPhase('checking');
-      const reg = await isRegistered(addr);
+      setPhase('checking')
+      const reg = await isRegistered(addr)
 
-      if (reg) navigate('/dashboard', { replace: true });
-      else navigate('/register', { replace: true });
+      if (reg) navigate('/dashboard', { replace: true })
+      else navigate('/register', { replace: true })
     } catch (err: any) {
-      setError(typeof err?.message === 'string' ? err.message : 'Failed to connect. Please try again.');
+      setError(typeof err?.message === 'string' ? err.message : 'Failed to connect. Please try again.')
     } finally {
-      setPhase('idle');
+      setPhase('idle')
     }
-  };
+  }
 
   return (
     <div style={styles.page}>
@@ -168,10 +161,10 @@ const Login: React.FC = () => {
                 ...(phase !== 'idle' || isConnecting ? styles.buttonDisabled : {}),
               }}
               onMouseOver={(e) => {
-                (e.currentTarget as HTMLButtonElement).style.background = colors.accentDark;
+                (e.currentTarget as HTMLButtonElement).style.background = colors.accentDark
               }}
               onMouseOut={(e) => {
-                (e.currentTarget as HTMLButtonElement).style.background = colors.accent;
+                (e.currentTarget as HTMLButtonElement).style.background = colors.accent
               }}
             >
               {buttonLabel}
@@ -184,7 +177,7 @@ const Login: React.FC = () => {
         </div>
       </div>
     </div>
-  );
-};
+  )
+}
 
-export default Login;
+export default Login
