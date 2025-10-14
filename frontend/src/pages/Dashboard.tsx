@@ -185,11 +185,16 @@ const styles: Record<string, React.CSSProperties & Record<string, any>> = {
     gap: 8,
     alignItems: 'start',
   },
-  stepDot: (bg: string): React.CSSProperties => ({
-    width: 12, height: 12, marginTop: 4,
-    borderRadius: '50%', background: bg,
-  }),
 }
+
+// moved out of styles to avoid callable type error
+const styleStepDot = (bg: string): React.CSSProperties => ({
+  width: 12,
+  height: 12,
+  marginTop: 4,
+  borderRadius: '50%',
+  background: bg,
+})
 
 const DangerousHtml: React.FC<{ html: string }> = ({ html }) => {
   const ref = useRef<HTMLDivElement | null>(null)
@@ -526,7 +531,7 @@ const Dashboard: React.FC = () => {
 
           <div style={{ display: 'grid', gap: 8, marginTop: 8 }}>
             <div style={styles.stepRow}>
-              <div style={styles.stepDot(dot(steps.sign))} />
+              <div style={styleStepDot(dot(steps.sign))} />
               <div>
                 <div style={{ fontWeight: 800 }}>Step 1 — Sign authorization message</div>
                 <div style={{ fontSize: 12, color: colors.navySoft }}>
@@ -535,7 +540,7 @@ const Dashboard: React.FC = () => {
               </div>
             </div>
             <div style={styles.stepRow}>
-              <div style={styles.stepDot(dot(steps.submit))} />
+              <div style={styleStepDot(dot(steps.submit))} />
               <div>
                 <div style={{ fontWeight: 800 }}>Step 2 — Send to server</div>
                 <div style={{ fontSize: 12, color: colors.navySoft }}>
@@ -544,7 +549,7 @@ const Dashboard: React.FC = () => {
               </div>
             </div>
             <div style={styles.stepRow}>
-              <div style={styles.stepDot(dot(steps.verify))} />
+              <div style={styleStepDot(dot(steps.verify))} />
               <div>
                 <div style={{ fontWeight: 800 }}>Step 3 — Verify & finish</div>
                 <div style={{ fontSize: 12, color: colors.navySoft }}>
