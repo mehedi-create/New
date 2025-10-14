@@ -1,4 +1,4 @@
-// frontend/src/Router.tsx
+// frontend/src/Router.tsx (শুধু Protected বদলে এইটা যোগ করো)
 import React, { Suspense, lazy, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { useWallet } from './context/WalletContext'
@@ -20,16 +20,26 @@ const Loader: React.FC<{ text?: string }> = ({ text = 'Loading…' }) => (
   </div>
 )
 
-// Scroll to top on route change
 const ScrollToTop: React.FC = () => {
   const { pathname } = useLocation()
   useEffect(() => { window.scrollTo({ top: 0, behavior: 'instant' as any }) }, [pathname])
   return null
 }
 
-const Protected: React.FC<{ children: React.ReactElement }> = ({ children }) => {
-  const { account } = useWallet()
+// New: Require wallet + registration
+const RequireRegistered: React.FC<{ children: React.ReactElement }> = ({ children }) => {
+  const { account, onChainStatus, isCheckingStatus, refreshStatus } = useWallet()
+
+  useEffect(() => {
+    if (account && onChainStatus === 'unregistered') {
+      // ensure latest on-chain status
+      refreshStatus().catch(() => {})
+    }
+  }, [account, onChainStatus, refreshStatus])
+
   if (!account) return <Navigate to="/login" replace />
+  if (isCheckingStatus || onChainStatus === 'checking') return <Loader text="Checking on-chain status…" />
+  if (onChainStatus !== 'registered') return <Navigate to="/register" replace />
   return children
 }
 
@@ -41,14 +51,13 @@ const AppRouter: React.FC = () => {
         <Routes>
           <Route path="/" element={<Navigate to="/login" replace />} />
           <Route path="/login" element={<Login />} />
-          {/* Allow open access to Register (page itself enforces wallet before submit) */}
           <Route path="/register" element={<Register />} />
           <Route
             path="/dashboard"
             element={
-              <Protected>
+              <RequireRegistered>
                 <Dashboard />
-              </Protected>
+              </RequireRegistered>
             }
           />
           <Route path="*" element={<Navigate to="/login" replace />} />
