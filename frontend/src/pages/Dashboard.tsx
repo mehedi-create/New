@@ -15,11 +15,12 @@ import {
   signAuthMessage,
   approveUSDT,
   buyMiner,
-  withdrawLiquidity,
   getUserMiningStats,
+  getRegistrationFee,
+  getLevel1ReferralIdsFromChain,
 } from '../utils/contract'
 import { showSuccessToast, showErrorToast } from '../utils/notification'
-import { api, getDashboardData, getUserBootstrap, upsertUserFromChain } from '../services/api'
+import { getStats, getNotices, markLogin, upsertUserFromChain } from '../services/api'
 import { isValidAddress } from '../utils/wallet'
 import { ethers, BrowserProvider } from 'ethers'
 
@@ -29,37 +30,26 @@ type OnChainData = {
   userBalance: string
   hasFundCode: boolean
   role: Role
+  registrationFee: string
   contractBalance?: string
   adminCommission?: string
 }
 
-type OffChainData = {
+type StatsData = {
   userId: string
   coin_balance: number
-  referralStats: {
-    total_referrals: number
-    level1_count: number
-    level2_count: number
-    level3_count: number
-  }
   logins: { total_login_days: number }
-  notices: Array<{
-    id: number
-    title: string
-    content_html: string
-    image_url?: string
-    link_url?: string
-    priority: number
-    created_at: string
-  }>
-  commissions?: {
-    percentages: { l1: number; l2: number; l3: number }
-    registration_fee_raw: string
-    l1_total_raw: string
-    l2_total_raw: string
-    l3_total_raw: string
-    total_estimated_raw: string
-  }
+}
+
+type Notice = {
+  id: number
+  title: string
+  content_html: string
+  image_url?: string
+  link_url?: string
+  kind?: string
+  priority: number
+  created_at: string
 }
 
 const colors = {
@@ -217,7 +207,6 @@ const DangerousHtml: React.FC<{ html: string }> = ({ html }) => {
   return <div ref={ref} />
 }
 
-// small helper
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 const Dashboard: React.FC = () => {
@@ -261,7 +250,7 @@ const Dashboard: React.FC = () => {
     setSteps({ sign: 'idle', submit: 'idle', verify: 'idle' })
   }, [account])
 
-  // On-chain data
+  // On-chain data (direct reads)
   const { data: onChainData, isLoading: isOnChainLoading } = useQuery<OnChainData | null>({
     queryKey: ['onChainData', account],
     enabled: isValidAddress(account),
@@ -269,16 +258,17 @@ const Dashboard: React.FC = () => {
     retry: 1,
     queryFn: async () => {
       if (!isValidAddress(account)) return null
-      const [owner, adminFlag, balance, hasCode] = await Promise.all([
+      const [owner, adminFlag, balance, hasCode, fee] = await Promise.all([
         getOwner(),
         isAdmin(account!),
         getUserBalance(account!),
         hasSetFundCode(account!),
+        getRegistrationFee(),
       ])
       let role: Role = 'user'
       if (account!.toLowerCase() === owner.toLowerCase()) role = 'owner'
       else if (adminFlag) role = 'admin'
-      const data: OnChainData = { userBalance: balance, hasFundCode: hasCode, role }
+      const data: OnChainData = { userBalance: balance, hasFundCode: hasCode, role, registrationFee: fee }
       if (role !== 'user') {
         const [contractBal, adminComm] = await Promise.all([getContractBalance(), getAdminCommission(account!)])
         data.contractBalance = contractBal
@@ -288,25 +278,24 @@ const Dashboard: React.FC = () => {
     },
   })
 
-  // Off-chain dashboard data
+  // Off-chain minimal stats (userId/coins/login days)
   const {
-    data: offChainData,
-    isLoading: isOffChainLoading,
-    refetch: refetchOffChain,
-  } = useQuery<OffChainData | null>({
-    queryKey: ['offChainData', account],
+    data: stats,
+    isLoading: isStatsLoading,
+    refetch: refetchStats,
+  } = useQuery<StatsData | null>({
+    queryKey: ['stats', account],
     enabled: isValidAddress(account),
-    retry: false, // no auto-retry to avoid load; we'll control via modal
+    retry: false,
     refetchOnWindowFocus: false,
     queryFn: async () => {
       if (!isValidAddress(account)) return null
       try {
-        const res = await getDashboardData(account!)
-        return res.data as OffChainData
+        const res = await getStats(account!)
+        return res.data
       } catch (err: any) {
         const status = err?.response?.status || err?.status
         if (status === 404) {
-          // DB-তে ইউজার নেই → modal দেখান
           setShowSignModal(true)
           return null
         }
@@ -315,23 +304,41 @@ const Dashboard: React.FC = () => {
     },
   })
 
-  // Level-1 referral list
+  // Notices (public)
+  const { data: notices = [] } = useQuery<Notice[]>({
+    queryKey: ['notices'],
+    queryFn: async () => {
+      const res = await getNotices({ limit: 10, active: 1 })
+      return (res.data?.notices || []) as Notice[]
+    },
+    refetchInterval: 120000,
+  })
+
+  // L1 referrals from chain (userId list)
   const { data: referralList = [], isLoading: isRefsLoading } = useQuery<string[]>({
-    queryKey: ['referrals', account],
+    queryKey: ['referralsL1', account],
+    enabled: isValidAddress(account),
+    refetchInterval: 120000,
+    queryFn: async () => {
+      if (!isValidAddress(account)) return []
+      return getLevel1ReferralIdsFromChain(account!)
+    },
+  })
+
+  // Mining stats from chain
+  const { data: miningStats } = useQuery<{ count: number; totalDeposited: string }>({
+    queryKey: ['miningStats', account],
     enabled: isValidAddress(account),
     refetchInterval: 60000,
     queryFn: async () => {
-      try {
-        const r = await api.get(`/api/referrals/${account}`)
-        if (Array.isArray(r.data?.list)) return r.data.list as string[]
-      } catch {}
-      return []
+      if (!isValidAddress(account)) return { count: 0, totalDeposited: '0.00' }
+      return getUserMiningStats(account!)
     },
   })
 
   const referralCode = useMemo(
-    () => (userId || offChainData?.userId || '').toUpperCase(),
-    [userId, offChainData?.userId]
+    () => (userId || stats?.userId || '').toUpperCase(),
+    [userId, stats?.userId]
   )
   const referralLink = useMemo(
     () => `${window.location.origin}/register?ref=${referralCode}`,
@@ -371,48 +378,34 @@ const Dashboard: React.FC = () => {
       // 1) Sign message
       const { timestamp, signature } = await signAuthMessage(account!)
       setSteps((s) => ({ ...s, sign: 'done', submit: 'running' }))
-      await sleep(300) // small pacing
+      await sleep(250)
 
-      // 2) Submit upsert (backend has rate-limit too)
+      // 2) Submit upsert (backend queued)
       await upsertUserFromChain(account!, timestamp, signature)
       setSteps((s) => ({ ...s, submit: 'done', verify: 'running' }))
 
-      // 3) Verify: poll bootstrap (max 3 tries, exponential backoff)
-      let ok = false
+      // 3) Verify by polling stats (3 tries, backoff)
       const delays = [800, 1600, 2600]
-      for (let i = 0; i < delays.length; i++) {
-        await sleep(delays[i])
+      let ok = false
+      for (let d of delays) {
+        await sleep(d)
         try {
-          const { data } = await getUserBootstrap(account!)
-          if (data?.action === 'redirect_dashboard') {
+          const res = await getStats(account!)
+          if (res?.data?.userId) {
             ok = true
             break
           }
         } catch {}
       }
-      if (!ok) {
-        // last attempt: light refetch dashboard once
-        try {
-          await refetchOffChain()
-          ok = true
-        } catch {}
-      }
 
       if (!ok) {
-        setSteps((s) => ({ ...s, verify: 'error' }))
-        setSyncError('Sync completed but verification failed. Please try again in a moment.')
-        return
+        // final gentle refetch
+        await refetchStats()
       }
 
       setSteps((s) => ({ ...s, verify: 'done' }))
       setLastSyncAt(Date.now())
-
-      // Refresh queries gently
-      await queryClient.invalidateQueries({ queryKey: ['offChainData', account] })
-      await queryClient.invalidateQueries({ queryKey: ['referrals', account] })
-
-      // Close modal after a short delay
-      await sleep(400)
+      await queryClient.invalidateQueries({ queryKey: ['stats', account] })
       setShowSignModal(false)
       showSuccessToast('Your data has been synced successfully.')
     } catch (e) {
@@ -480,9 +473,9 @@ const Dashboard: React.FC = () => {
     setIsProcessing(true)
     try {
       const { timestamp, signature } = await signAuthMessage(account!)
-      await api.post(`/api/users/${account}/login`, { timestamp, signature })
+      await markLogin(account!, timestamp, signature)
       showSuccessToast('Login counted for today')
-      refetchOffChain()
+      refetchStats()
     } catch (e) {
       showErrorToast(e, 'Unable to mark login')
     } finally {
@@ -506,15 +499,8 @@ const Dashboard: React.FC = () => {
       if ((tx1 as any)?.wait) await (tx1 as any).wait()
       const tx2 = await buyMiner(miningAmount)
       if ((tx2 as any)?.wait) await (tx2 as any).wait()
-      try {
-        await api.post('/api/forms/mining/submit', {
-          wallet_address: account,
-          fields: { amount_usdt: amountNum, duration_days: 30, source: 'onchain' },
-        })
-      } catch {}
       showSuccessToast('Miner purchased on-chain')
       setMiningAmount('')
-      // refresh any mining-related cache
       queryClient.invalidateQueries({ queryKey: ['miningStats', account] })
     } catch (e) {
       showErrorToast(e, 'Failed to buy miner')
@@ -523,7 +509,7 @@ const Dashboard: React.FC = () => {
     }
   }
 
-  // --------------- UI ---------------
+  // Modal render
   const renderSignModal = () => {
     if (!showSignModal) return null
     const dot = (s: StepStatus) =>
@@ -553,7 +539,7 @@ const Dashboard: React.FC = () => {
               <div>
                 <div style={{ fontWeight: 800 }}>Step 2 — Send to server</div>
                 <div style={{ fontSize: 12, color: colors.navySoft }}>
-                  Your signed message lets us fetch on‑chain data and upsert your profile.
+                  Your signed message lets us upsert your profile off‑chain.
                 </div>
               </div>
             </div>
@@ -644,11 +630,10 @@ const Dashboard: React.FC = () => {
 
             <div style={{ ...styles.small, marginTop: 6 }}>
               Total Coin Balance:{' '}
-              <strong>{isOffChainLoading ? '...' : offChainData?.coin_balance ?? 0}</strong>
+              <strong>{isStatsLoading ? '...' : stats?.coin_balance ?? 0}</strong>
             </div>
-            <div style={{ ...styles.small, marginTop: 4, lineHeight: 1.5 }}>
-              Per Refer: 5 coins, Daily Login: 1 coin. <br />
-              Mining rewards will also add here.
+            <div style={{ ...styles.small, marginTop: 4 }}>
+              Daily Login adds 1 coin. Referral adds 5 coins (off‑chain).
             </div>
             <button style={{ ...styles.buttonGhost, marginTop: 8 }} disabled={true}>
               Payout (Coming Soon)
@@ -681,7 +666,7 @@ const Dashboard: React.FC = () => {
           <div style={styles.card}>
             <h3 style={styles.cardTitle}>Notice Board</h3>
             <div style={styles.noticeScroller}>
-              {(offChainData?.notices ?? []).map((n) => (
+              {(notices ?? []).map((n) => (
                 <div
                   key={n.id}
                   style={styles.noticeCard}
@@ -704,7 +689,7 @@ const Dashboard: React.FC = () => {
                   </div>
                 </div>
               ))}
-              {(!offChainData || (offChainData.notices || []).length === 0) && (
+              {(notices || []).length === 0 && (
                 <div style={{ ...styles.small, ...styles.muted }}>No notices yet.</div>
               )}
             </div>
@@ -713,8 +698,7 @@ const Dashboard: React.FC = () => {
           <div style={styles.card}>
             <h3 style={styles.cardTitle}>Mining</h3>
             <div style={styles.small}>
-              Buy a miner with USDT (min 5 USDT). Points will be calculated off‑chain. Funds are held
-              on‑chain as a vault.
+              Buy a miner with USDT (min 5 USDT). Points will be derived from on‑chain events.
             </div>
             <div style={{ ...styles.row, marginTop: 6 }}>
               <input
@@ -735,22 +719,25 @@ const Dashboard: React.FC = () => {
                 Approve & Buy Miner
               </button>
             </div>
-            <MiningStats account={account} />
+            <div style={{ ...styles.small, marginTop: 6 }}>
+              Your Mining Stats: Miners <strong>{miningStats?.count ?? 0}</strong> • Total Deposited{' '}
+              <strong>${safeMoney(miningStats?.totalDeposited)}</strong>
+            </div>
           </div>
 
           <div style={styles.card}>
             <h3 style={styles.cardTitle}>Your Stats</h3>
             <div style={styles.statRow}>
               <div style={styles.statBox}>
-                <div style={styles.statLabel}>Total Refer</div>
+                <div style={styles.statLabel}>Total Refer (L1)</div>
                 <div style={styles.statValue}>
-                  {isOffChainLoading ? '...' : offChainData?.referralStats?.total_referrals ?? 0}
+                  {isRefsLoading ? '...' : referralList.length}
                 </div>
               </div>
               <div style={styles.statBox}>
                 <div style={styles.statLabel}>Total Login (days)</div>
                 <div style={styles.statValue}>
-                  {isOffChainLoading ? '...' : offChainData?.logins?.total_login_days ?? 0}
+                  {isStatsLoading ? '...' : stats?.logins?.total_login_days ?? 0}
                 </div>
               </div>
             </div>
@@ -763,13 +750,14 @@ const Dashboard: React.FC = () => {
                 Mark Today’s Login
               </button>
             </div>
-            {!!offChainData?.commissions && (
+            {!!onChainData && (
               <>
                 <div style={styles.divider} />
                 <div style={styles.small}>
-                  Commission estimate — L1: {offChainData.commissions.percentages.l1}% • L2:{' '}
-                  {offChainData.commissions.percentages.l2}% • L3:{' '}
-                  {offChainData.commissions.percentages.l3}%
+                  Registration fee (on‑chain): <strong>${safeMoney(onChainData.registrationFee)}</strong>
+                </div>
+                <div style={{ ...styles.small, marginTop: 4 }}>
+                  Commission percentages — L1: 40% • L2: 20% • L3: 10% (estimated on‑chain)
                 </div>
               </>
             )}
@@ -800,29 +788,6 @@ const Dashboard: React.FC = () => {
           {(onChainData?.role === 'admin' || onChainData?.role === 'owner') && <AdminPanel />}
         </div>
       </div>
-    </div>
-  )
-}
-
-const MiningStats: React.FC<{ account: string | null }> = ({ account }) => {
-  const { data: miningStats } = useQuery<{ count: number; totalDeposited: string }>({
-    queryKey: ['miningStats', account],
-    enabled: isValidAddress(account),
-    refetchInterval: 60000,
-    queryFn: async () => {
-      if (!isValidAddress(account)) return { count: 0, totalDeposited: '0.00' }
-      return getUserMiningStats(account!)
-    },
-  })
-  const safeMoney = (val?: string) => {
-    const n = parseFloat(val || '0')
-    if (isNaN(n)) return '0.00'
-    return n.toFixed(2)
-  }
-  return (
-    <div style={{ ...styles.small, marginTop: 6 }}>
-      Your Mining Stats: Miners <strong>{miningStats?.count ?? 0}</strong> • Total Deposited{' '}
-      <strong>${safeMoney(miningStats?.totalDeposited)}</strong>
     </div>
   )
 }
@@ -874,7 +839,7 @@ Timestamp: ${ts}`
     try {
       const dataUrl = await readFileAsDataURL(file)
       setImagePreview(dataUrl)
-      setImageUrl(dataUrl) // Store as data URL; optional: later move to CDN
+      setImageUrl(dataUrl)
     } catch (e) {
       showErrorToast(e, 'Failed to load image')
     }
@@ -890,7 +855,6 @@ Timestamp: ${ts}`
   const postNotice = async () => {
     if (!account) return
 
-    // Build payload according to type
     let payload: any = {
       address: account,
       title: title.trim(),
@@ -906,7 +870,7 @@ Timestamp: ${ts}`
       }
       payload.image_url = imageUrl
       payload.link_url = linkUrl || ''
-      payload.content_html = '' // not used for image
+      payload.content_html = ''
     } else if (noticeType === 'text') {
       if (!textContent.trim()) {
         showErrorToast('Please write some text')
@@ -914,7 +878,7 @@ Timestamp: ${ts}`
       }
       payload.image_url = ''
       payload.link_url = ''
-      payload.content_html = textContent // plain text/HTML
+      payload.content_html = textContent
     } else {
       if (!scriptContent.trim()) {
         showErrorToast('Please add script content')
@@ -928,10 +892,11 @@ Timestamp: ${ts}`
     setIsProcessing(true)
     try {
       const { timestamp, signature } = await signAdminAction('create_notice', account)
-      await api.post('/api/notices', { ...payload, timestamp, signature })
+      const { createNotice } = await import('../services/api')
+      await createNotice({ ...payload, timestamp, signature })
       showSuccessToast('Notice posted')
 
-      queryClient.invalidateQueries({ queryKey: ['offChainData', account] })
+      queryClient.invalidateQueries({ queryKey: ['notices'] })
 
       // reset form
       setTitle('')
@@ -953,7 +918,6 @@ Timestamp: ${ts}`
     <div style={styles.card}>
       <h3 style={styles.cardTitle}>Admin Panel</h3>
 
-      {/* Type switch */}
       <div style={styles.tabRow as any}>
         <button
           style={{ ...styles.tabBtn, ...(noticeType === 'image' ? styles.tabBtnActive : {}) }}
@@ -975,7 +939,6 @@ Timestamp: ${ts}`
         </button>
       </div>
 
-      {/* Common fields */}
       <div style={{ ...styles.row, marginTop: 8 }}>
         <div>
           <div style={{ ...styles.small, marginBottom: 4 }}>Title</div>
@@ -998,7 +961,6 @@ Timestamp: ${ts}`
         </div>
       </div>
 
-      {/* Image mode */}
       {noticeType === 'image' && (
         <>
           <div style={styles.row}>
@@ -1034,7 +996,6 @@ Timestamp: ${ts}`
         </>
       )}
 
-      {/* Text mode */}
       {noticeType === 'text' && (
         <div style={{ marginTop: 6 }}>
           <div style={{ ...styles.small, marginBottom: 4 }}>Text content (plain text or simple HTML)</div>
@@ -1047,7 +1008,6 @@ Timestamp: ${ts}`
         </div>
       )}
 
-      {/* Script mode */}
       {noticeType === 'script' && (
         <div style={{ marginTop: 6 }}>
           <div style={{ ...styles.small, marginBottom: 4 }}>
@@ -1062,7 +1022,6 @@ Timestamp: ${ts}`
         </div>
       )}
 
-      {/* Active + Post */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
           <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} />
@@ -1074,8 +1033,7 @@ Timestamp: ${ts}`
       </div>
 
       <div style={{ ...styles.small, ...styles.muted, marginTop: 6 }}>
-        Note: Uploaded image is stored as data URL in DB for now. For production, consider a CDN
-        (Cloudflare Images/R2) and use the Image URL field.
+        Note: For production, consider using a CDN (Cloudflare Images/R2) for images.
       </div>
     </div>
   )
