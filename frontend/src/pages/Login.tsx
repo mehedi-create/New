@@ -1,5 +1,5 @@
 // frontend/src/pages/Login.tsx
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useWallet } from '../context/WalletContext'
 import { isRegistered } from '../utils/contract'
 import { useNavigate } from 'react-router-dom'
@@ -88,13 +88,17 @@ const Login: React.FC = () => {
   const [phase, setPhase] = useState<Phase>('idle')
   const [error, setError] = useState<string>('')
 
+  // Keep the latest account in a ref to avoid stale-closure in async loops
+  const accountRef = useRef<string | null>(account)
+  useEffect(() => { accountRef.current = account }, [account])
+
   const buttonLabel = useMemo(() => {
     if (phase === 'connecting') return 'Connecting...'
     if (phase === 'checking') return 'Checking status...'
-    return 'Connect Wallet'
-  }, [phase])
+    return isValidAddress(account) ? 'Continue' : 'Connect Wallet'
+  }, [phase, account])
 
-  // Block copy/select/context menu on this page (optional)
+  // Optional: Block copy/select/context menu
   useEffect(() => {
     const prevent = (e: Event) => e.preventDefault()
     document.addEventListener('copy', prevent)
@@ -112,31 +116,54 @@ const Login: React.FC = () => {
   const waitForAccount = async (timeoutMs = 8000): Promise<string | null> => {
     const start = Date.now()
     while (Date.now() - start < timeoutMs) {
-      if (isValidAddress(account)) return account!
+      const addr = accountRef.current
+      if (isValidAddress(addr)) return addr!
       await new Promise((r) => setTimeout(r, 120))
     }
     return null
   }
 
+  const checkAndRedirect = async (addr: string) => {
+    setPhase('checking')
+    try {
+      const reg = await isRegistered(addr)
+      if (reg) navigate('/dashboard', { replace: true })
+      else navigate('/register', { replace: true })
+    } catch (err: any) {
+      setError(typeof err?.message === 'string' ? err.message : 'Failed to check status. Please try again.')
+    } finally {
+      setPhase('idle')
+    }
+  }
+
+  // Auto-redirect if wallet already connected
+  useEffect(() => {
+    if (!isConnecting && phase === 'idle' && isValidAddress(account)) {
+      checkAndRedirect(account!)
+    }
+  }, [account, isConnecting, phase])
+
   const handleConnect = async () => {
     if (phase !== 'idle' || isConnecting) return
     setError('')
+
     try {
+      // If wallet already connected, just check status
+      if (isValidAddress(account)) {
+        await checkAndRedirect(account!)
+        return
+      }
+
       setPhase('connecting')
       await connect()
 
       const addr = await waitForAccount()
       if (!addr) {
-        setPhase('idle')
         setError('Wallet address not detected. Please try again.')
         return
       }
 
-      setPhase('checking')
-      const reg = await isRegistered(addr)
-
-      if (reg) navigate('/dashboard', { replace: true })
-      else navigate('/register', { replace: true })
+      await checkAndRedirect(addr)
     } catch (err: any) {
       setError(typeof err?.message === 'string' ? err.message : 'Failed to connect. Please try again.')
     } finally {
