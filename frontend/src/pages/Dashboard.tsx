@@ -1,7 +1,7 @@
 // frontend/src/pages/Dashboard.tsx
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useWallet } from '../context/WalletContext';
+import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useWallet } from '../context/WalletContext'
 import {
   withdrawWithFundCode,
   getUserBalance,
@@ -17,50 +17,51 @@ import {
   buyMiner,
   withdrawLiquidity,
   getUserMiningStats,
-} from '../utils/contract';
-import { showSuccessToast, showErrorToast } from '../utils/notification';
-import { config } from '../config';
-import { api, getDashboardData, getUserBootstrap, upsertUserFromChain } from '../services/api';
-import { ethers, BrowserProvider } from 'ethers';
+} from '../utils/contract'
+import { showSuccessToast, showErrorToast } from '../utils/notification'
+import { config } from '../config'
+import { api, getDashboardData, getUserBootstrap, upsertUserFromChain } from '../services/api'
+import { ethers, BrowserProvider } from 'ethers'
+import { isValidAddress } from '../utils/wallet'
 
-type Role = 'user' | 'admin' | 'owner';
+type Role = 'user' | 'admin' | 'owner'
 
 type OnChainData = {
-  userBalance: string;
-  hasFundCode: boolean;
-  role: Role;
-  contractBalance?: string;
-  adminCommission?: string;
-};
+  userBalance: string
+  hasFundCode: boolean
+  role: Role
+  contractBalance?: string
+  adminCommission?: string
+}
 
 type OffChainData = {
-  userId: string;
-  coin_balance: number;
+  userId: string
+  coin_balance: number
   referralStats: {
-    total_referrals: number;
-    level1_count: number;
-    level2_count: number;
-    level3_count: number;
-  };
-  logins: { total_login_days: number };
+    total_referrals: number
+    level1_count: number
+    level2_count: number
+    level3_count: number
+  }
+  logins: { total_login_days: number }
   notices: Array<{
-    id: number;
-    title: string;
-    content_html: string;
-    image_url?: string;
-    link_url?: string;
-    priority: number;
-    created_at: string;
-  }>;
+    id: number
+    title: string
+    content_html: string
+    image_url?: string
+    link_url?: string
+    priority: number
+    created_at: string
+  }>
   commissions?: {
-    percentages: { l1: number; l2: number; l3: number };
-    registration_fee_raw: string;
-    l1_total_raw: string;
-    l2_total_raw: string;
-    l3_total_raw: string;
-    total_estimated_raw: string;
-  };
-};
+    percentages: { l1: number; l2: number; l3: number }
+    registration_fee_raw: string
+    l1_total_raw: string
+    l2_total_raw: string
+    l3_total_raw: string
+    total_estimated_raw: string
+  }
+}
 
 const colors = {
   bgLightGreen: '#e8f9f1',
@@ -71,7 +72,7 @@ const colors = {
   danger: '#b91c1c',
   white: '#ffffff',
   grayLine: 'rgba(11,27,59,0.10)',
-};
+}
 
 const styles: Record<string, React.CSSProperties & Record<string, any>> = {
   page: {
@@ -167,180 +168,245 @@ const styles: Record<string, React.CSSProperties & Record<string, any>> = {
   previewImg: {
     width: '100%', maxHeight: 200, objectFit: 'cover' as const, borderRadius: 10, border: `1px solid ${colors.grayLine}`,
   },
-};
+}
 
 const DangerousHtml: React.FC<{ html: string }> = ({ html }) => {
-  const ref = useRef<HTMLDivElement | null>(null);
+  const ref = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
-    if (!ref.current) return;
-    ref.current.innerHTML = html || '';
-    const scripts = Array.from(ref.current.querySelectorAll('script'));
+    if (!ref.current) return
+    ref.current.innerHTML = html || ''
+    const scripts = Array.from(ref.current.querySelectorAll('script'))
     scripts.forEach((oldScript) => {
-      const s = document.createElement('script');
-      for (const { name, value } of Array.from(oldScript.attributes)) s.setAttribute(name, value);
-      s.textContent = oldScript.textContent;
-      oldScript.replaceWith(s);
-    });
-  }, [html]);
-  return <div ref={ref} />;
-};
+      const s = document.createElement('script')
+      for (const { name, value } of Array.from(oldScript.attributes)) s.setAttribute(name, value)
+      s.textContent = oldScript.textContent
+      oldScript.replaceWith(s)
+    })
+  }, [html])
+  return <div ref={ref} />
+}
 
 const Dashboard: React.FC = () => {
-  const { account, userId, disconnect } = useWallet();
-  const queryClient = useQueryClient();
-  const [isProcessing, setIsProcessing] = useState(false);
+  const { account, userId, disconnect } = useWallet()
+  const queryClient = useQueryClient()
+  const [isProcessing, setIsProcessing] = useState(false)
+
+  // New: bootstrap gate so dashboard data only fetches after upsert-if-needed
+  const [isBootstrapped, setIsBootstrapped] = useState(false)
 
   // Prevent copy/select/context menu
   useEffect(() => {
-    const prevent = (e: Event) => e.preventDefault();
-    document.addEventListener('copy', prevent);
-    document.addEventListener('cut', prevent);
-    document.addEventListener('contextmenu', prevent);
-    document.addEventListener('selectstart', prevent);
+    const prevent = (e: Event) => e.preventDefault()
+    document.addEventListener('copy', prevent)
+    document.addEventListener('cut', prevent)
+    document.addEventListener('contextmenu', prevent)
+    document.addEventListener('selectstart', prevent)
     return () => {
-      document.removeEventListener('copy', prevent);
-      document.removeEventListener('cut', prevent);
-      document.removeEventListener('contextmenu', prevent);
-      document.removeEventListener('selectstart', prevent);
-    };
-  }, []);
+      document.removeEventListener('copy', prevent)
+      document.removeEventListener('cut', prevent)
+      document.removeEventListener('contextmenu', prevent)
+      document.removeEventListener('selectstart', prevent)
+    }
+  }, [])
 
-  // Auto-sync off-chain if needed
+  // Bootstrap + auto-sync off-chain if needed (before dashboard queries)
   useEffect(() => {
-    if (!account) return;
-    (async () => {
+    setIsBootstrapped(false)
+    if (!isValidAddress(account)) return
+    ;(async () => {
       try {
-        const { data } = await getUserBootstrap(account);
+        const { data } = await getUserBootstrap(account!)
         if (data?.action === 'await_backend_sync') {
-          const { timestamp, signature } = await signAuthMessage(account);
-          await upsertUserFromChain(account, timestamp, signature);
-          queryClient.invalidateQueries({ queryKey: ['offChainData', account] });
+          const { timestamp, signature } = await signAuthMessage(account!)
+          await upsertUserFromChain(account!, timestamp, signature)
+          await queryClient.invalidateQueries({ queryKey: ['offChainData', account] })
         }
-      } catch {}
-    })();
-  }, [account, queryClient]);
+      } catch {
+        // Ignore bootstrap errors; dashboard queries stay disabled if no account
+      } finally {
+        setIsBootstrapped(true)
+      }
+    })()
+  }, [account, queryClient])
 
   const { data: onChainData, isLoading: isOnChainLoading } = useQuery<OnChainData | null>({
     queryKey: ['onChainData', account],
-    enabled: !!account,
+    enabled: isValidAddress(account),
     refetchInterval: 15000,
+    retry: 1,
     queryFn: async () => {
-      if (!account) return null;
+      if (!isValidAddress(account)) return null
       const [owner, adminFlag, balance, hasCode] = await Promise.all([
-        getOwner(), isAdmin(account), getUserBalance(account), hasSetFundCode(account),
-      ]);
-      let role: Role = 'user';
-      if (account.toLowerCase() === owner.toLowerCase()) role = 'owner';
-      else if (adminFlag) role = 'admin';
-      const data: OnChainData = { userBalance: balance, hasFundCode: hasCode, role };
+        getOwner(),
+        isAdmin(account!),
+        getUserBalance(account!),
+        hasSetFundCode(account!),
+      ])
+      let role: Role = 'user'
+      if (account!.toLowerCase() === owner.toLowerCase()) role = 'owner'
+      else if (adminFlag) role = 'admin'
+      const data: OnChainData = { userBalance: balance, hasFundCode: hasCode, role }
       if (role !== 'user') {
-        const [contractBal, adminComm] = await Promise.all([getContractBalance(), getAdminCommission(account)]);
-        data.contractBalance = contractBal; data.adminCommission = adminComm;
+        const [contractBal, adminComm] = await Promise.all([getContractBalance(), getAdminCommission(account!)])
+        data.contractBalance = contractBal
+        data.adminCommission = adminComm
       }
-      return data;
+      return data
     },
-  });
+  })
 
-  const { data: offChainData, isLoading: isOffChainLoading, refetch: refetchOffChain } = useQuery<OffChainData>({
+  const {
+    data: offChainData,
+    isLoading: isOffChainLoading,
+    refetch: refetchOffChain,
+  } = useQuery<OffChainData>({
     queryKey: ['offChainData', account],
-    enabled: !!account,
+    enabled: isBootstrapped && isValidAddress(account),
     refetchInterval: 15000,
+    retry: 0, // avoid spamming 404 before bootstrap
+    refetchOnWindowFocus: false,
     queryFn: async () => {
-      const res = await getDashboardData(account!);
-      return res.data as OffChainData;
+      const res = await getDashboardData(account!)
+      return res.data as OffChainData
     },
-  });
+  })
 
   const { data: miningStats, refetch: refetchMining } = useQuery<{ count: number; totalDeposited: string }>({
     queryKey: ['miningStats', account],
-    enabled: !!account,
+    enabled: isValidAddress(account),
     queryFn: async () => {
-      if (!account) return { count: 0, totalDeposited: '0.00' };
-      return getUserMiningStats(account);
+      if (!isValidAddress(account)) return { count: 0, totalDeposited: '0.00' }
+      return getUserMiningStats(account!)
     },
-  });
+  })
 
   const { data: referralList = [], isLoading: isRefsLoading } = useQuery<string[]>({
     queryKey: ['referrals', account],
-    enabled: !!account,
+    enabled: isValidAddress(account),
     refetchInterval: 60000,
     queryFn: async () => {
       try {
-        const r = await api.get(`/api/referrals/${account}`);
-        if (Array.isArray(r.data?.list)) return r.data.list as string[];
+        const r = await api.get(`/api/referrals/${account}`)
+        if (Array.isArray(r.data?.list)) return r.data.list as string[]
       } catch {}
-      return [];
+      return []
     },
-  });
+  })
 
-  const referralCode = useMemo(() => (userId || offChainData?.userId || '').toUpperCase(), [userId, offChainData?.userId]);
-  const referralLink = useMemo(() => `${window.location.origin}/register?ref=${referralCode}`, [referralCode]);
-  const initials = (referralCode || 'U').slice(0, 2).toUpperCase();
+  const referralCode = useMemo(
+    () => (userId || offChainData?.userId || '').toUpperCase(),
+    [userId, offChainData?.userId]
+  )
+  const referralLink = useMemo(
+    () => `${window.location.origin}/register?ref=${referralCode}`,
+    [referralCode]
+  )
+  const initials = (referralCode || 'U').slice(0, 2).toUpperCase()
 
   const safeMoney = (val?: string) => {
-    const n = parseFloat(val || '0');
-    if (isNaN(n)) return '0.00';
-    return n.toFixed(2);
-  };
+    const n = parseFloat(val || '0')
+    if (isNaN(n)) return '0.00'
+    return n.toFixed(2)
+  }
 
   const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-    showSuccessToast('Copied to clipboard');
-  };
+    navigator.clipboard.writeText(text)
+    showSuccessToast('Copied to clipboard')
+  }
 
   const handleUserPayout = async () => {
-    if (!onChainData?.hasFundCode) { showErrorToast('Fund code not set. Please register with a fund code.'); return; }
-    const code = window.prompt('Enter your secret Fund Code'); if (!code) return;
-    setIsProcessing(true);
+    if (!onChainData?.hasFundCode) {
+      showErrorToast('Fund code not set. Please register with a fund code.')
+      return
+    }
+    const code = window.prompt('Enter your secret Fund Code')
+    if (!code) return
+    setIsProcessing(true)
     try {
-      const tx = await withdrawWithFundCode(code); if (tx?.wait) await tx.wait();
-      showSuccessToast('Payout successful!');
-    } catch (e) { showErrorToast(e, 'Payout failed'); } finally { setIsProcessing(false); }
-  };
+      const tx = await withdrawWithFundCode(code)
+      if ((tx as any)?.wait) await (tx as any).wait()
+      showSuccessToast('Payout successful!')
+    } catch (e) {
+      showErrorToast(e, 'Payout failed')
+    } finally {
+      setIsProcessing(false)
+    }
+  }
 
   const handleAdminPayout = async () => {
-    setIsProcessing(true);
-    try { const tx = await withdrawCommission(); if (tx?.wait) await tx.wait(); showSuccessToast('Commission withdrawn'); }
-    catch (e) { showErrorToast(e, 'Commission withdrawal failed'); }
-    finally { setIsProcessing(false); }
-  };
+    setIsProcessing(true)
+    try {
+      const tx = await withdrawCommission()
+      if ((tx as any)?.wait) await (tx as any).wait()
+      showSuccessToast('Commission withdrawn')
+    } catch (e) {
+      showErrorToast(e, 'Commission withdrawal failed')
+    } finally {
+      setIsProcessing(false)
+    }
+  }
 
   const handleEmergencyWithdraw = async () => {
-    if (!onChainData || onChainData.role !== 'owner') return;
-    if (!window.confirm('Withdraw all contract funds to owner wallet?')) return;
-    setIsProcessing(true);
-    try { const tx = await emergencyWithdrawAll(); if (tx?.wait) await tx.wait(); showSuccessToast('Emergency withdraw completed'); }
-    catch (e) { showErrorToast(e, 'Emergency withdraw failed'); }
-    finally { setIsProcessing(false); }
-  };
+    if (!onChainData || onChainData.role !== 'owner') return
+    if (!window.confirm('Withdraw all contract funds to owner wallet?')) return
+    setIsProcessing(true)
+    try {
+      const tx = await emergencyWithdrawAll()
+      if ((tx as any)?.wait) await (tx as any).wait()
+      showSuccessToast('Emergency withdraw completed')
+    } catch (e) {
+      showErrorToast(e, 'Emergency withdraw failed')
+    } finally {
+      setIsProcessing(false)
+    }
+  }
 
   const handleMarkTodayLogin = async () => {
-    if (!account) return;
-    setIsProcessing(true);
+    if (!isValidAddress(account)) return
+    setIsProcessing(true)
     try {
-      const { timestamp, signature } = await signAuthMessage(account);
-      await api.post(`/api/users/${account}/login`, { timestamp, signature });
-      showSuccessToast('Login counted for today');
-      refetchOffChain();
-    } catch (e) { showErrorToast(e, 'Unable to mark login'); }
-    finally { setIsProcessing(false); }
-  };
+      const { timestamp, signature } = await signAuthMessage(account!)
+      await api.post(`/api/users/${account}/login`, { timestamp, signature })
+      showSuccessToast('Login counted for today')
+      refetchOffChain()
+    } catch (e) {
+      showErrorToast(e, 'Unable to mark login')
+    } finally {
+      setIsProcessing(false)
+    }
+  }
 
-  const [miningAmount, setMiningAmount] = useState<string>(''); const amountNum = Number(miningAmount || '0');
-  const canBuy = !!account && amountNum >= 5;
+  const [miningAmount, setMiningAmount] = useState<string>('')
+  const amountNum = Number(miningAmount || '0')
+  const canBuy = !!account && amountNum >= 5
 
   const handleBuyMiner = async () => {
-    if (!account) return;
-    if (!canBuy) { showErrorToast('Minimum 5 USDT required.'); return; }
-    setIsProcessing(true);
+    if (!isValidAddress(account)) return
+    if (!canBuy) {
+      showErrorToast('Minimum 5 USDT required.')
+      return
+    }
+    setIsProcessing(true)
     try {
-      const tx1 = await approveUSDT(miningAmount); if (tx1?.wait) await tx1.wait();
-      const tx2 = await buyMiner(miningAmount); if (tx2?.wait) await tx2.wait();
-      try { await api.post('/api/forms/mining/submit', { wallet_address: account, fields: { amount_usdt: amountNum, duration_days: 30, source: 'onchain' } }); } catch {}
-      showSuccessToast('Miner purchased on-chain'); setMiningAmount(''); refetchMining();
-    } catch (e) { showErrorToast(e, 'Failed to buy miner'); }
-    finally { setIsProcessing(false); }
-  };
+      const tx1 = await approveUSDT(miningAmount)
+      if ((tx1 as any)?.wait) await (tx1 as any).wait()
+      const tx2 = await buyMiner(miningAmount)
+      if ((tx2 as any)?.wait) await (tx2 as any).wait()
+      try {
+        await api.post('/api/forms/mining/submit', {
+          wallet_address: account,
+          fields: { amount_usdt: amountNum, duration_days: 30, source: 'onchain' },
+        })
+      } catch {}
+      showSuccessToast('Miner purchased on-chain')
+      setMiningAmount('')
+      refetchMining()
+    } catch (e) {
+      showErrorToast(e, 'Failed to buy miner')
+    } finally {
+      setIsProcessing(false)
+    }
+  }
 
   return (
     <div style={styles.page}>
@@ -349,44 +415,64 @@ const Dashboard: React.FC = () => {
           <div style={styles.brand}>Web3 Community</div>
           <div style={styles.userBox}>
             <div style={styles.avatar}>{initials}</div>
-            <button style={styles.logoutBtn} onClick={() => { disconnect(); }}>Logout</button>
+            <button
+              style={styles.logoutBtn}
+              onClick={() => {
+                disconnect()
+              }}
+            >
+              Logout
+            </button>
           </div>
         </div>
 
         <div style={styles.grid}>
           <div style={styles.card}>
             <h3 style={styles.cardTitle}>Available Balance</h3>
-            {isOnChainLoading ? <div style={{ height: 26, background: '#eef2f6', borderRadius: 8 }} /> : <div style={styles.balance}>${safeMoney(onChainData?.userBalance)}</div>}
+            {isOnChainLoading ? (
+              <div style={{ height: 26, background: '#eef2f6', borderRadius: 8 }} />
+            ) : (
+              <div style={styles.balance}>${safeMoney(onChainData?.userBalance)}</div>
+            )}
             <div style={styles.row}>
-              <button style={styles.button} disabled={isProcessing || isOnChainLoading} onClick={onChainData?.role === 'user' ? handleUserPayout : handleAdminPayout}>
+              <button
+                style={styles.button}
+                disabled={isProcessing || isOnChainLoading}
+                onClick={onChainData?.role === 'user' ? handleUserPayout : handleAdminPayout}
+              >
                 {onChainData?.role === 'user' ? 'Payout' : 'Withdraw Commission'}
               </button>
             </div>
-            
+
             <div style={styles.divider} />
 
             <div style={{ ...styles.small, marginTop: 6 }}>
-                Total Coin Balance: <strong>{isOffChainLoading ? '...' : (offChainData?.coin_balance ?? 0)}</strong>
+              Total Coin Balance:{' '}
+              <strong>{isOffChainLoading ? '...' : offChainData?.coin_balance ?? 0}</strong>
             </div>
-            <div style={{...styles.small, marginTop: 4, lineHeight: 1.5}}>
-                Per Refer: 5 coins, Daily Login: 1 coin. <br />
-                Mining rewards will also add here.
+            <div style={{ ...styles.small, marginTop: 4, lineHeight: 1.5 }}>
+              Per Refer: 5 coins, Daily Login: 1 coin. <br />
+              Mining rewards will also add here.
             </div>
-            <button 
-                style={{...styles.buttonGhost, marginTop: 8}} 
-                disabled={true} 
-            >
-                Payout (Coming Soon)
+            <button style={{ ...styles.buttonGhost, marginTop: 8 }} disabled={true}>
+              Payout (Coming Soon)
             </button>
-            
+
             {onChainData?.role !== 'user' && (
               <div style={{ marginTop: 6, ...styles.small }}>
-                Contract: <strong>${safeMoney(onChainData?.contractBalance)}</strong> • Your Commission: <strong>${safeMoney(onChainData?.adminCommission)}</strong>
+                Contract: <strong>${safeMoney(onChainData?.contractBalance)}</strong> • Your
+                Commission: <strong>${safeMoney(onChainData?.adminCommission)}</strong>
               </div>
             )}
             {onChainData?.role === 'owner' && (
               <div style={{ marginTop: 6 }}>
-                <button style={styles.buttonDanger} disabled={isProcessing} onClick={handleEmergencyWithdraw}>Emergency Withdraw All</button>
+                <button
+                  style={styles.buttonDanger}
+                  disabled={isProcessing}
+                  onClick={handleEmergencyWithdraw}
+                >
+                  Emergency Withdraw All
+                </button>
               </div>
             )}
             {!isOnChainLoading && !onChainData?.hasFundCode && (
@@ -403,12 +489,20 @@ const Dashboard: React.FC = () => {
                 <div
                   key={n.id}
                   style={styles.noticeCard}
-                  onClick={() => { if (n.link_url) window.open(n.link_url, '_blank'); }}
+                  onClick={() => {
+                    if (n.link_url) window.open(n.link_url, '_blank')
+                  }}
                   title={n.title}
                 >
-                  {n.image_url ? <img src={n.image_url} alt={n.title} style={styles.noticeImg as any} /> : <div style={styles.noticeImg as any} />}
+                  {n.image_url ? (
+                    <img src={n.image_url} alt={n.title} style={styles.noticeImg as any} />
+                  ) : (
+                    <div style={styles.noticeImg as any} />
+                  )}
                   <div style={{ fontWeight: 900, marginBottom: 4 }}>{n.title}</div>
-                  <div style={{ ...styles.small, ...styles.muted, marginBottom: 6 }}>{new Date(n.created_at).toLocaleString()}</div>
+                  <div style={{ ...styles.small, ...styles.muted, marginBottom: 6 }}>
+                    {new Date(n.created_at).toLocaleString()}
+                  </div>
                   <div style={{ fontSize: 13, color: colors.navySoft, maxHeight: 120, overflow: 'auto' }}>
                     <DangerousHtml html={n.content_html} />
                   </div>
@@ -423,33 +517,66 @@ const Dashboard: React.FC = () => {
           <div style={styles.card}>
             <h3 style={styles.cardTitle}>Mining</h3>
             <div style={styles.small}>
-              Buy a miner with USDT (min 5 USDT). Points will be calculated off‑chain. Funds are held on‑chain as a vault.
+              Buy a miner with USDT (min 5 USDT). Points will be calculated off‑chain. Funds are held
+              on‑chain as a vault.
             </div>
             <div style={{ ...styles.row, marginTop: 6 }}>
-              <input style={styles.input} type="number" min={0} step="0.1" placeholder="Enter amount in USDT (min 5)" value={miningAmount} onChange={(e) => setMiningAmount(e.target.value)} />
-              <button className="buy-miner" style={styles.button} disabled={!canBuy || isProcessing} onClick={handleBuyMiner}>
+              <input
+                style={styles.input}
+                type="number"
+                min={0}
+                step="0.1"
+                placeholder="Enter amount in USDT (min 5)"
+                value={miningAmount}
+                onChange={(e) => setMiningAmount(e.target.value)}
+              />
+              <button
+                className="buy-miner"
+                style={styles.button}
+                disabled={!canBuy || isProcessing}
+                onClick={handleBuyMiner}
+              >
                 Approve & Buy Miner
               </button>
             </div>
             <div style={{ ...styles.small, marginTop: 6 }}>
-              Your Mining Stats: Miners <strong>{miningStats?.count ?? 0}</strong> • Total Deposited <strong>${safeMoney(miningStats?.totalDeposited)}</strong>
+              Your Mining Stats: Miners <strong>{miningStats?.count ?? 0}</strong> • Total Deposited{' '}
+              <strong>${safeMoney(miningStats?.totalDeposited)}</strong>
             </div>
           </div>
 
           <div style={styles.card}>
             <h3 style={styles.cardTitle}>Your Stats</h3>
             <div style={styles.statRow}>
-              <div style={styles.statBox}><div style={styles.statLabel}>Total Refer</div><div style={styles.statValue}>{isOffChainLoading ? '...' : (offChainData?.referralStats?.total_referrals ?? 0)}</div></div>
-              <div style={styles.statBox}><div style={styles.statLabel}>Total Login (days)</div><div style={styles.statValue}>{isOffChainLoading ? '...' : (offChainData?.logins?.total_login_days ?? 0)}</div></div>
+              <div style={styles.statBox}>
+                <div style={styles.statLabel}>Total Refer</div>
+                <div style={styles.statValue}>
+                  {isOffChainLoading ? '...' : offChainData?.referralStats?.total_referrals ?? 0}
+                </div>
+              </div>
+              <div style={styles.statBox}>
+                <div style={styles.statLabel}>Total Login (days)</div>
+                <div style={styles.statValue}>
+                  {isOffChainLoading ? '...' : offChainData?.logins?.total_login_days ?? 0}
+                </div>
+              </div>
             </div>
             <div style={{ ...styles.row, marginTop: 8 }}>
-              <button style={styles.button} disabled={isProcessing || !account} onClick={handleMarkTodayLogin}>Mark Today’s Login</button>
+              <button
+                style={styles.button}
+                disabled={isProcessing || !account}
+                onClick={handleMarkTodayLogin}
+              >
+                Mark Today’s Login
+              </button>
             </div>
             {!isOffChainLoading && offChainData?.commissions && (
               <>
                 <div style={styles.divider} />
                 <div style={styles.small}>
-                  Commission estimate — L1: {offChainData.commissions.percentages.l1}% • L2: {offChainData.commissions.percentages.l2}% • L3: {offChainData.commissions.percentages.l3}%
+                  Commission estimate — L1: {offChainData.commissions.percentages.l1}% • L2:{' '}
+                  {offChainData.commissions.percentages.l2}% • L3:{' '}
+                  {offChainData.commissions.percentages.l3}%
                 </div>
               </>
             )}
@@ -461,100 +588,91 @@ const Dashboard: React.FC = () => {
               <div style={{ ...styles.small, marginBottom: 4 }}>Referral Code</div>
               <div style={styles.copyWrap}>
                 <input style={styles.input} readOnly value={referralCode || ''} />
-                <button style={styles.button} onClick={() => copyToClipboard(referralCode)}>Copy</button>
+                <button style={styles.button} onClick={() => copyToClipboard(referralCode)}>
+                  Copy
+                </button>
               </div>
             </div>
             <div>
               <div style={{ ...styles.small, marginBottom: 4 }}>Referral Link</div>
               <div style={styles.copyWrap}>
                 <input style={styles.input} readOnly value={referralLink} />
-                <button style={styles.button} onClick={() => copyToClipboard(referralLink)}>Copy</button>
+                <button style={styles.button} onClick={() => copyToClipboard(referralLink)}>
+                  Copy
+                </button>
               </div>
             </div>
-          </div>
-
-          <div style={styles.card}>
-            <h3 style={styles.cardTitle}>Your Referrals (Level 1)</h3>
-            {isRefsLoading ? (
-              <div style={{ ...styles.small, ...styles.muted }}>Loading...</div>
-            ) : referralList.length === 0 ? (
-              <div style={{ ...styles.small, ...styles.muted }}>No referrals yet.</div>
-            ) : (
-              <ul style={{ margin: 0, paddingLeft: 16 }}>
-                {referralList.map((id, idx) => <li key={`${id}-${idx}`} style={{ marginBottom: 4, fontSize: 14 }}>{id}</li>)}
-              </ul>
-            )}
           </div>
 
           {(onChainData?.role === 'admin' || onChainData?.role === 'owner') && <AdminPanel />}
         </div>
       </div>
     </div>
-  );
-};
+  )
+}
 
 // ----------------- Admin Panel with Image/Text/Script options -----------------
 const AdminPanel: React.FC = () => {
-  const { account } = useWallet();
-  const queryClient = useQueryClient();
-  const [isProcessing, setIsProcessing] = useState(false);
+  const { account } = useWallet()
+  const queryClient = useQueryClient()
+  const [isProcessing, setIsProcessing] = useState(false)
 
-  type NoticeType = 'image' | 'text' | 'script';
-  const [noticeType, setNoticeType] = useState<NoticeType>('image');
+  type NoticeType = 'image' | 'text' | 'script'
+  const [noticeType, setNoticeType] = useState<NoticeType>('image')
 
-  const [title, setTitle] = useState('');
-  const [priority, setPriority] = useState<number>(0);
-  const [isActive, setIsActive] = useState<boolean>(true);
+  const [title, setTitle] = useState('')
+  const [priority, setPriority] = useState<number>(0)
+  const [isActive, setIsActive] = useState<boolean>(true)
 
   // Image fields
-  const [imageUrl, setImageUrl] = useState('');
-  const [linkUrl, setLinkUrl] = useState('');
-  const [imagePreview, setImagePreview] = useState<string>('');
+  const [imageUrl, setImageUrl] = useState('')
+  const [linkUrl, setLinkUrl] = useState('')
+  const [imagePreview, setImagePreview] = useState<string>('')
 
   // Text/script fields
-  const [textContent, setTextContent] = useState('');
-  const [scriptContent, setScriptContent] = useState('');
+  const [textContent, setTextContent] = useState('')
+  const [scriptContent, setScriptContent] = useState('')
 
   const signAdminAction = async (purpose: string, address: string) => {
-    const provider = new BrowserProvider((window as any).ethereum);
-    const signer = await provider.getSigner();
-    const ts = Math.floor(Date.now() / 1000);
+    const provider = new BrowserProvider((window as any).ethereum)
+    const signer = await provider.getSigner()
+    const ts = Math.floor(Date.now() / 1000)
     const message = `Admin action authorization
 Purpose: ${purpose}
 Address: ${ethers.getAddress(address)}
-Timestamp: ${ts}`;
-    const signature = await signer.signMessage(message);
-    return { timestamp: ts, signature };
-  };
+Timestamp: ${ts}`
+    const signature = await signer.signMessage(message)
+    return { timestamp: ts, signature }
+  }
 
   const readFileAsDataURL = (file: File): Promise<string> =>
     new Promise((resolve, reject) => {
-      const fr = new FileReader();
-      fr.onload = () => resolve(String(fr.result || ''));
-      fr.onerror = reject;
-      fr.readAsDataURL(file);
-    });
+      const fr = new FileReader()
+      fr.onload = () => resolve(String(fr.result || ''))
+      fr.onerror = reject
+      fr.readAsDataURL(file)
+    })
 
   const onPickImage = async (file?: File | null) => {
-    if (!file) return;
+    if (!file) return
     try {
-      const dataUrl = await readFileAsDataURL(file);
-      setImagePreview(dataUrl);
-      setImageUrl(dataUrl); // Store as data URL; optional: later move to CDN
+      const dataUrl = await readFileAsDataURL(file)
+      setImagePreview(dataUrl)
+      setImageUrl(dataUrl) // Store as data URL; optional: later move to CDN
     } catch (e) {
-      showErrorToast(e, 'Failed to load image');
+      showErrorToast(e, 'Failed to load image')
     }
-  };
+  }
 
   const wrapScriptIfNeeded = (code: string) => {
-    const trimmed = code.trim();
-    if (!trimmed) return '';
-    if (trimmed.toLowerCase().includes('<script')) return trimmed;
-    return `<script>\n${trimmed}\n</script>`;
-  };
+    const trimmed = code.trim()
+    if (!trimmed) return ''
+    if (trimmed.toLowerCase().includes('<script')) return trimmed
+    return `<script>\n${trimmed}\n</script>`
+  }
 
   const postNotice = async () => {
-    if (!account) return;
+    if (!account) return
 
     // Build payload according to type
     let payload: any = {
@@ -563,52 +681,57 @@ Timestamp: ${ts}`;
       is_active: isActive,
       priority,
       kind: noticeType,
-    };
+    }
 
     if (noticeType === 'image') {
       if (!imageUrl) {
-        showErrorToast('Please provide an image (upload or URL)');
-        return;
+        showErrorToast('Please provide an image (upload or URL)')
+        return
       }
-      payload.image_url = imageUrl;
-      payload.link_url = linkUrl || '';
-      payload.content_html = ''; // not used for image
+      payload.image_url = imageUrl
+      payload.link_url = linkUrl || ''
+      payload.content_html = '' // not used for image
     } else if (noticeType === 'text') {
       if (!textContent.trim()) {
-        showErrorToast('Please write some text');
-        return;
+        showErrorToast('Please write some text')
+        return
       }
-      payload.image_url = '';
-      payload.link_url = '';
-      payload.content_html = textContent; // plain text/HTML
+      payload.image_url = ''
+      payload.link_url = ''
+      payload.content_html = textContent // plain text/HTML
     } else {
       if (!scriptContent.trim()) {
-        showErrorToast('Please add script content');
-        return;
+        showErrorToast('Please add script content')
+        return
       }
-      payload.image_url = '';
-      payload.link_url = '';
-      payload.content_html = wrapScriptIfNeeded(scriptContent);
+      payload.image_url = ''
+      payload.link_url = ''
+      payload.content_html = wrapScriptIfNeeded(scriptContent)
     }
 
-    setIsProcessing(true);
+    setIsProcessing(true)
     try {
-      const { timestamp, signature } = await signAdminAction('create_notice', account);
-      await api.post('/api/notices', { ...payload, timestamp, signature });
-      showSuccessToast('Notice posted');
-      
-      queryClient.invalidateQueries({ queryKey: ['offChainData', account] });
+      const { timestamp, signature } = await signAdminAction('create_notice', account)
+      await api.post('/api/notices', { ...payload, timestamp, signature })
+      showSuccessToast('Notice posted')
+
+      queryClient.invalidateQueries({ queryKey: ['offChainData', account] })
 
       // reset form
-      setTitle(''); setPriority(0); setIsActive(true);
-      setImageUrl(''); setLinkUrl(''); setImagePreview('');
-      setTextContent(''); setScriptContent('');
+      setTitle('')
+      setPriority(0)
+      setIsActive(true)
+      setImageUrl('')
+      setLinkUrl('')
+      setImagePreview('')
+      setTextContent('')
+      setScriptContent('')
     } catch (e) {
-      showErrorToast(e, 'Failed to post notice');
+      showErrorToast(e, 'Failed to post notice')
     } finally {
-      setIsProcessing(false);
+      setIsProcessing(false)
     }
-  };
+  }
 
   return (
     <div style={styles.card}>
@@ -640,7 +763,12 @@ Timestamp: ${ts}`;
       <div style={{ ...styles.row, marginTop: 8 }}>
         <div>
           <div style={{ ...styles.small, marginBottom: 4 }}>Title</div>
-          <input style={styles.input} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Enter title" />
+          <input
+            style={styles.input}
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="Enter title"
+          />
         </div>
         <div>
           <div style={{ ...styles.small, marginBottom: 4 }}>Priority</div>
@@ -660,11 +788,7 @@ Timestamp: ${ts}`;
           <div style={styles.row}>
             <div>
               <div style={{ ...styles.small, marginBottom: 4 }}>Upload from gallery</div>
-              <input
-                type="file"
-                accept="image/*"
-                onChange={(e) => onPickImage(e.target.files?.[0] || null)}
-              />
+              <input type="file" accept="image/*" onChange={(e) => onPickImage(e.target.files?.[0] || null)} />
               {imagePreview && (
                 <div style={{ marginTop: 8 }}>
                   <img src={imagePreview} alt="preview" style={styles.previewImg as any} />
@@ -673,7 +797,12 @@ Timestamp: ${ts}`;
             </div>
             <div>
               <div style={{ ...styles.small, marginBottom: 4 }}>Or Image URL</div>
-              <input style={styles.input} value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="https://..." />
+              <input
+                style={styles.input}
+                value={imageUrl}
+                onChange={(e) => setImageUrl(e.target.value)}
+                placeholder="https://..."
+              />
             </div>
           </div>
 
@@ -729,10 +858,11 @@ Timestamp: ${ts}`;
       </div>
 
       <div style={{ ...styles.small, ...styles.muted, marginTop: 6 }}>
-        Note: Uploaded image is stored as data URL in DB for now. For production, consider a CDN (Cloudflare Images/R2) and use the Image URL field.
+        Note: Uploaded image is stored as data URL in DB for now. For production, consider a CDN
+        (Cloudflare Images/R2) and use the Image URL field.
       </div>
     </div>
-  );
-};
+  )
+}
 
-export default Dashboard;
+export default Dashboard
