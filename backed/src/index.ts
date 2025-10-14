@@ -1,27 +1,19 @@
 // backed/src/index.ts
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
-import {
-  ethers,
-  JsonRpcProvider,
-  Contract,
-  Interface,
-  zeroPadValue,
-} from 'ethers'
+import { ethers, JsonRpcProvider, Contract } from 'ethers'
 
 // ---------- Env Bindings ----------
 type Bindings = {
   DB: D1Database
   ALLOWED_ORIGINS: string
-  // RPC + contract config
   BSC_RPC_URL?: string
   CONTRACT_ADDRESS: string
-  START_BLOCK?: string
 }
 
 const app = new Hono<{ Bindings: Bindings }>()
 
-// In-memory guards (best-effort)
+// in-memory light guards
 const inflightUpsert = new Set<string>()
 const lastUpsertAt = new Map<string, number>()
 
@@ -30,12 +22,14 @@ app.use('/*', async (c, next) => {
   const allowed = (c.env.ALLOWED_ORIGINS || '')
     .split(',')
     .map((s) => s.trim())
+    .filter(Boolean)
+
   return cors({
     origin: (origin) => {
       if (!origin) return allowed[0] || '*'
       return allowed.includes(origin) ? origin : allowed[0] || '*'
     },
-    allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowMethods: ['GET', 'POST', 'PATCH', 'OPTIONS'],
     allowHeaders: ['Content-Type', 'Authorization'],
     maxAge: 86400,
   })(c, next)
@@ -51,18 +45,17 @@ app.notFound((c) => {
   return c.json({ ok: false, error: 'NOT_FOUND', path }, 404)
 })
 
-// ---------- Schema (Auto-create if missing) ----------
+// ---------- Schema ----------
 async function ensureSchema(db: D1Database) {
   const stmts = [
     `CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id TEXT UNIQUE,
+      user_id TEXT,
       wallet_address TEXT UNIQUE,
       referrer_id TEXT,
-      registration_tx_hash TEXT,
       is_active INTEGER DEFAULT 1,
       coin_balance INTEGER DEFAULT 0,
-      created_at TEXT
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
     )`,
     `CREATE TABLE IF NOT EXISTS logins (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -83,53 +76,25 @@ async function ensureSchema(db: D1Database) {
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT
     )`,
-    `CREATE TABLE IF NOT EXISTS form_submissions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      form_key TEXT NOT NULL,
-      wallet_address TEXT,
-      fields_json TEXT NOT NULL,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE TABLE IF NOT EXISTS miners (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      wallet_address TEXT NOT NULL,
-      amount_raw TEXT NOT NULL,
-      start_time INTEGER,
-      end_time INTEGER,
-      tx_hash TEXT,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP
-    )`,
   ]
   await db.batch(stmts.map((sql) => db.prepare(sql)))
 
-  try {
-    await db.prepare(`ALTER TABLE notices ADD COLUMN kind TEXT DEFAULT 'text'`).run()
-  } catch {}
-  try {
-    await db.prepare(`ALTER TABLE users ADD COLUMN coin_balance INTEGER DEFAULT 0`).run()
-  } catch {}
+  // columns that may not exist in older DBs
+  try { await db.prepare(`ALTER TABLE users ADD COLUMN coin_balance INTEGER DEFAULT 0`).run() } catch {}
+  try { await db.prepare(`ALTER TABLE notices ADD COLUMN kind TEXT DEFAULT 'text'`).run() } catch {}
 }
-
 app.use('*', async (c, next) => {
   await ensureSchema(c.env.DB)
   await next()
 })
 
-// ---------- Contract ABI ----------
+// ---------- Minimal on-chain helpers ----------
 const PLATFORM_ABI = [
   'function isRegistered(address) view returns (bool)',
   'function addressToUserId(address) view returns (string)',
   'function referrerOf(address) view returns (address)',
-  'function hasSetFundCode(address) view returns (bool)',
-  'function userBalances(address) view returns (uint256)',
-  'function registrationFee() view returns (uint256)',
   'function owner() view returns (address)',
-  'function getContractBalance() view returns (uint256)',
-  'event UserRegistered(address indexed user, string userId, address indexed referrer)',
-  'event MinerPurchased(address indexed user, uint256 amount, uint256 startTime, uint256 endTime)',
 ]
-const iface = new Interface(PLATFORM_ABI)
-const USER_REGISTERED_TOPIC0 = ethers.id('UserRegistered(address,string,address)')
 
 function getProvider(env: Bindings): JsonRpcProvider {
   const url = env.BSC_RPC_URL
@@ -140,14 +105,9 @@ function getContract(env: Bindings, provider: JsonRpcProvider) {
   return new Contract(env.CONTRACT_ADDRESS, PLATFORM_ABI, provider)
 }
 
+// ---------- Sign/Verify helpers ----------
 function buildUserAuthMessage(address: string, timestamp: number) {
   return `I authorize the backend to sync my on-chain profile.
-Address: ${ethers.getAddress(address)}
-Timestamp: ${timestamp}`
-}
-function buildAdminAuthMessage(purpose: string, address: string, timestamp: number) {
-  return `Admin action authorization
-Purpose: ${purpose}
 Address: ${ethers.getAddress(address)}
 Timestamp: ${timestamp}`
 }
@@ -169,117 +129,18 @@ async function requireOwner(env: Bindings, address: string) {
   if (ethers.getAddress(owner) !== ethers.getAddress(address)) {
     throw new Error('Not authorized: only contract owner allowed')
   }
-  return owner
 }
 
-// Light-weight: avoid heavy full-chain scans
-async function getRegistrationLogForUser(env: Bindings, address: string) {
-  const provider = getProvider(env)
-
-  // If deploy start not configured (or "0"), skip scanning to avoid timeouts
-  const startCfg = Number(env.START_BLOCK || 0)
-  if (!startCfg) return null
-
-  try {
-    const latest = await provider.getBlockNumber()
-    // Limit scan range to reduce load (max ~200k blocks)
-    const fromBlock = Math.max(startCfg, latest - 200_000)
-    const paddedUser = zeroPadValue(ethers.getAddress(address), 32)
-
-    const logs = await provider.getLogs({
-      address: env.CONTRACT_ADDRESS,
-      fromBlock,
-      toBlock: 'latest',
-      topics: [USER_REGISTERED_TOPIC0, paddedUser],
-    })
-
-    if (!logs || logs.length === 0) return null
-
-    const lg = logs[0]
-    const block = await provider.getBlock(lg.blockNumber)
-    let userIdFromEvent: string | undefined
-    let referrerFromEvent: string | undefined
-    try {
-      const parsed = iface.parseLog(lg)
-      userIdFromEvent = parsed?.args?.userId
-      referrerFromEvent = parsed?.args?.referrer
-    } catch {}
-    return {
-      txHash: lg.transactionHash,
-      blockNumber: lg.blockNumber,
-      timestamp: block?.timestamp ? Number(block.timestamp) : undefined,
-      userIdFromEvent,
-      referrerFromEvent,
-    }
-  } catch (err) {
-    console.warn('getRegistrationLogForUser skipped:', (err as any)?.message || err)
-    return null
-  }
-}
-
-async function readUserFromChain(env: Bindings, addr: string) {
-  const address = ethers.getAddress(addr)
-  const provider = getProvider(env)
-  const contract = getContract(env, provider)
-
-  const [registered, userId, referrer, hasFundCode, balanceWei] = await Promise.all([
-    contract.isRegistered(address),
-    contract.addressToUserId(address),
-    contract.referrerOf(address),
-    contract.hasSetFundCode(address),
-    contract.userBalances(address),
-  ])
-
-  let referrerId = ''
-  if (referrer && referrer !== ethers.ZeroAddress) {
-    try {
-      referrerId = await contract.addressToUserId(referrer)
-    } catch {
-      referrerId = ''
-    }
-  }
-
-  const regLog = await getRegistrationLogForUser(env, address)
-
-  return {
-    address,
-    isRegistered: Boolean(registered),
-    userId: userId || '',
-    referrerAddress:
-      referrer && referrer !== ethers.ZeroAddress ? ethers.getAddress(referrer) : ethers.ZeroAddress,
-    referrerId,
-    hasFundCode: Boolean(hasFundCode),
-    balanceWei: balanceWei ? BigInt(balanceWei) : 0n,
-    registeredTxHash: regLog?.txHash,
-    registeredBlockNumber: regLog?.blockNumber,
-    registeredAt: regLog?.timestamp,
-  }
-}
-
-async function getDbUserByAddress(db: D1Database, lowerAddr: string) {
-  return db
-    .prepare('SELECT user_id, referrer_id, registration_tx_hash FROM users WHERE wallet_address = ?')
-    .bind(lowerAddr)
-    .first<{ user_id: string; referrer_id: string; registration_tx_hash: string }>()
-}
-
+// ---------- DB helpers ----------
 async function upsertDbUser(
   db: D1Database,
-  payload: {
-    walletAddress: string
-    userId: string
-    referrerId: string
-    txHash?: string
-    createdAtISO?: string
-  }
+  payload: { walletAddress: string; userId: string; referrerId: string }
 ) {
-  const createdAt = payload.createdAtISO || new Date().toISOString()
-  const stmt = `INSERT INTO users (user_id, wallet_address, referrer_id, registration_tx_hash, is_active, created_at)
-                VALUES (?, ?, ?, ?, 1, ?)
+  const stmt = `INSERT INTO users (user_id, wallet_address, referrer_id, is_active)
+                VALUES (?, ?, ?, 1)
                 ON CONFLICT(wallet_address) DO UPDATE SET
                   user_id = excluded.user_id,
                   referrer_id = excluded.referrer_id,
-                  registration_tx_hash = COALESCE(excluded.registration_tx_hash, registration_tx_hash),
                   is_active = 1`
   await db
     .prepare(stmt)
@@ -287,30 +148,12 @@ async function upsertDbUser(
       payload.userId.toUpperCase(),
       payload.walletAddress.toLowerCase(),
       payload.referrerId?.toUpperCase() || '',
-      payload.txHash || null,
-      createdAt
     )
     .run()
 }
 
 function todayISODate() {
-  const d = new Date()
-  return d.toISOString().slice(0, 10) // YYYY-MM-DD
-}
-
-function safeFormKey(key: string) {
-  return key.toLowerCase().replace(/[^a-z0-9_]/g, '_').slice(0, 48)
-}
-async function ensureDynamicFormTable(db: D1Database, key: string) {
-  const table = `form_${safeFormKey(key)}`
-  const sql = `CREATE TABLE IF NOT EXISTS ${table} (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    wallet_address TEXT,
-    fields_json TEXT NOT NULL,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP
-  )`
-  await db.prepare(sql).run()
-  return table
+  return new Date().toISOString().slice(0, 10)
 }
 
 // ---------- API Routes ----------
@@ -318,49 +161,11 @@ async function ensureDynamicFormTable(db: D1Database, key: string) {
 // Health
 app.get('/api/health', (c) => c.json({ ok: true, time: Date.now() }))
 
-// Bootstrap user status (chain + db)
-app.get('/api/users/:address', async (c) => {
-  try {
-    const { address } = c.req.param()
-    if (!ethers.isAddress(address)) return c.json({ error: 'Invalid wallet address' }, 400)
-
-    const lower = address.toLowerCase()
-    const onChain = await readUserFromChain(c.env, address)
-    const offChain = await getDbUserByAddress(c.env.DB, lower)
-
-    const exists = Boolean(offChain)
-    const action =
-      onChain.isRegistered && exists
-        ? 'redirect_dashboard'
-        : onChain.isRegistered && !exists
-        ? 'await_backend_sync'
-        : 'show_register'
-
-    return c.json({
-      address: ethers.getAddress(address),
-      onChain,
-      offChain: exists
-        ? {
-            exists: true,
-            userId: offChain!.user_id,
-            referrerId: offChain!.referrer_id,
-            registrationTxHash: offChain!.registration_tx_hash,
-          }
-        : { exists: false },
-      action,
-    })
-  } catch (e: any) {
-    console.error('GET /api/users/:address error:', e.stack || e.message)
-    return c.json({ error: 'Server error' }, 500)
-  }
-})
-
-// Sync user from chain (signed) — with light rate-limit
+// Upsert user (signed) — front-end gets on-chain data directly; backend only verifies lightly.
 app.post('/api/users/upsert-from-chain', async (c) => {
   try {
     const body = await c.req.json<{ address: string; timestamp: number; signature: string }>()
     const { address, timestamp, signature } = body || ({} as any)
-
     if (!ethers.isAddress(address)) return c.json({ error: 'Invalid wallet address' }, 400)
     if (!timestamp || !signature) return c.json({ error: 'Missing timestamp/signature' }, 400)
 
@@ -369,54 +174,53 @@ app.post('/api/users/upsert-from-chain', async (c) => {
       return c.json({ error: 'Signature expired, please try again.' }, 400)
     }
 
-    // Rate-limit per address (best-effort)
+    // light rate-limit
     const key = address.toLowerCase()
     const now = Date.now()
     const last = lastUpsertAt.get(key) || 0
-    if (now - last < 5000) {
-      return c.json({ error: 'Please wait a few seconds before trying again.' }, 429)
-    }
-    if (inflightUpsert.has(key)) {
-      return c.json({ error: 'Sync already in progress. Please wait.' }, 409)
-    }
+    if (now - last < 5000) return c.json({ error: 'Please wait a few seconds and try again.' }, 429)
+    if (inflightUpsert.has(key)) return c.json({ error: 'Sync in progress. Please wait.' }, 409)
     inflightUpsert.add(key)
 
-    const message = buildUserAuthMessage(address, Number(timestamp))
-    await verifySignedMessage(address, message, signature)
+    const msg = buildUserAuthMessage(address, Number(timestamp))
+    await verifySignedMessage(address, msg, signature)
 
-    const onChain = await readUserFromChain(c.env, address)
-    if (!onChain.isRegistered) {
+    // Minimal on-chain verify (no log scan)
+    const provider = getProvider(c.env)
+    const contract = getContract(c.env, provider)
+    const [registered, userId, refAddr] = await Promise.all([
+      contract.isRegistered(address),
+      contract.addressToUserId(address),
+      contract.referrerOf(address),
+    ])
+    if (!registered || !userId) {
       inflightUpsert.delete(key)
-      return c.json({ error: 'Address is not registered on-chain' }, 400)
+      return c.json({ error: 'Address not registered on-chain' }, 400)
     }
 
-    const dbUserBefore = await getDbUserByAddress(c.env.DB, address.toLowerCase())
+    let referrerId = ''
+    if (refAddr && refAddr !== ethers.ZeroAddress) {
+      try {
+        referrerId = await contract.addressToUserId(refAddr)
+      } catch {}
+    }
 
     await upsertDbUser(c.env.DB, {
       walletAddress: address,
-      userId: onChain.userId,
-      referrerId: onChain.referrerId || '',
-      txHash: onChain.registeredTxHash,
-      createdAtISO: onChain.registeredAt ? new Date(onChain.registeredAt * 1000).toISOString() : undefined,
+      userId,
+      referrerId: referrerId || '',
     })
-
-    // Award referrer only if it’s a new insert (avoid abuse)
-    if (!dbUserBefore && onChain.referrerId && onChain.referrerId.length > 0) {
-      await c.env.DB.prepare('UPDATE users SET coin_balance = coin_balance + 5 WHERE user_id = ?')
-        .bind(onChain.referrerId.toUpperCase())
-        .run()
-    }
 
     lastUpsertAt.set(key, now)
     inflightUpsert.delete(key)
-    return c.json({ ok: true })
+    return c.json({ ok: true, userId, referrerId: referrerId || '' })
   } catch (e: any) {
     console.error('POST /api/users/upsert-from-chain error:', e.stack || e.message)
     return c.json({ error: 'Server error' }, 500)
   }
 })
 
-// Record daily login (signed)
+// Daily login (signed) → +1 coin/day
 app.post('/api/users/:address/login', async (c) => {
   try {
     const { address } = c.req.param()
@@ -424,35 +228,42 @@ app.post('/api/users/:address/login', async (c) => {
 
     const body = await c.req.json<{ timestamp: number; signature: string }>()
     const { timestamp, signature } = body || ({} as any)
+    if (!timestamp || !signature) return c.json({ error: 'Missing auth params' }, 400)
 
-    if (!timestamp || !signature) return c.json({ error: 'Missing timestamp/signature' }, 400)
     const nowSec = Math.floor(Date.now() / 1000)
     if (Math.abs(nowSec - Number(timestamp)) > 300) return c.json({ error: 'Signature expired' }, 400)
 
-    const message = buildUserAuthMessage(address, Number(timestamp))
-    await verifySignedMessage(address, message, signature)
+    const msg = buildUserAuthMessage(address, Number(timestamp))
+    await verifySignedMessage(address, msg, signature)
 
     const lower = address.toLowerCase()
-    const loginDate = todayISODate()
+    // must exist in DB (ask user to Sign & Sync first)
+    const exists = await c.env.DB
+      .prepare('SELECT 1 FROM users WHERE wallet_address = ?')
+      .bind(lower)
+      .first()
+    if (!exists) return c.json({ error: 'User not found. Please sync first.' }, 404)
 
-    const { results } = await c.env.DB.prepare(
-      'SELECT id FROM logins WHERE wallet_address = ? AND login_date = ?'
-    )
+    const loginDate = todayISODate()
+    const { results } = await c.env.DB
+      .prepare('SELECT id FROM logins WHERE wallet_address = ? AND login_date = ?')
       .bind(lower, loginDate)
       .all()
 
     if (!results || results.length === 0) {
       await c.env.DB.batch([
-        c.env.DB
-          .prepare('INSERT INTO logins (wallet_address, login_date) VALUES (?, ?)')
-          .bind(lower, loginDate),
+        c.env.DB.prepare('INSERT INTO logins (wallet_address, login_date) VALUES (?, ?)').bind(
+          lower,
+          loginDate
+        ),
         c.env.DB
           .prepare('UPDATE users SET coin_balance = coin_balance + 1 WHERE wallet_address = ?')
           .bind(lower),
       ])
     }
 
-    const row = await c.env.DB.prepare('SELECT COUNT(*) AS cnt FROM logins WHERE wallet_address = ?')
+    const row = await c.env.DB
+      .prepare('SELECT COUNT(*) AS cnt FROM logins WHERE wallet_address = ?')
       .bind(lower)
       .first<{ cnt: number }>()
 
@@ -463,209 +274,38 @@ app.post('/api/users/:address/login', async (c) => {
   }
 })
 
-// Dashboard data with fallback auto-upsert
-app.get('/api/dashboard/:walletAddress', async (c) => {
-  const { walletAddress } = c.req.param()
-  if (!ethers.isAddress(walletAddress)) {
-    return c.json({ error: 'Invalid wallet address' }, 400)
-  }
-
+// Off-chain stats only (coins/logins + stored userId); on-chain সব ফ্রন্টএন্ড নেবে
+app.get('/api/stats/:address', async (c) => {
   try {
-    const db = c.env.DB
-    const lower = walletAddress.toLowerCase()
+    const { address } = c.req.param()
+    if (!ethers.isAddress(address)) return c.json({ error: 'Invalid wallet address' }, 400)
 
-    let user = await db
+    const lower = address.toLowerCase()
+    const user = await c.env.DB
       .prepare('SELECT user_id, coin_balance FROM users WHERE wallet_address = ?')
       .bind(lower)
       .first<{ user_id: string; coin_balance: number }>()
-
-    // Fallback: not in DB → read chain → if registered, upsert (no coin award here)
-    if (!user) {
-      try {
-        const onChain = await readUserFromChain(c.env, walletAddress)
-        if (onChain.isRegistered && onChain.userId) {
-          await upsertDbUser(db, {
-            walletAddress,
-            userId: onChain.userId,
-            referrerId: onChain.referrerId || '',
-            txHash: onChain.registeredTxHash,
-            createdAtISO: onChain.registeredAt
-              ? new Date(onChain.registeredAt * 1000).toISOString()
-              : undefined,
-          })
-          user = await db
-            .prepare('SELECT user_id, coin_balance FROM users WHERE wallet_address = ?')
-            .bind(lower)
-            .first<{ user_id: string; coin_balance: number }>()
-        }
-      } catch (e) {
-        console.warn('Dashboard fallback upsert failed:', (e as any)?.message || e)
-      }
-    }
-
     if (!user) return c.json({ error: 'User not found' }, 404)
 
-    const userId = user.user_id
-
-    // Level 1
-    const level1 = await db
-      .prepare('SELECT user_id FROM users WHERE referrer_id = ? ORDER BY created_at DESC')
-      .bind(userId)
-      .all<{ user_id: string }>()
-    const level1Ids = (level1.results || []).map((u) => u.user_id)
-    const level1Count = level1Ids.length
-
-    // Level 2
-    let level2Ids: string[] = []
-    if (level1Ids.length > 0) {
-      const placeholders = level1Ids.map(() => '?').join(',')
-      const level2Rows = await db
-        .prepare(`SELECT user_id FROM users WHERE referrer_id IN (${placeholders})`)
-        .bind(...level1Ids)
-        .all<{ user_id: string }>()
-      level2Ids = (level2Rows.results || []).map((u) => u.user_id)
-    }
-    const level2Count = level2Ids.length
-
-    // Level 3
-    let level3Count = 0
-    if (level2Ids.length > 0) {
-      const placeholders = level2Ids.map(() => '?').join(',')
-      const level3Rows = await db
-        .prepare(`SELECT COUNT(*) as count FROM users WHERE referrer_id IN (${placeholders})`)
-        .bind(...level2Ids)
-        .first<{ count: number }>()
-      level3Count = level3Rows?.count || 0
-    }
-
-    const totalReferrals = level1Count + level2Count + level3Count
-
-    // Total login days
-    const loginRow = await db
+    const loginRow = await c.env.DB
       .prepare('SELECT COUNT(*) AS cnt FROM logins WHERE wallet_address = ?')
       .bind(lower)
       .first<{ cnt: number }>()
     const totalLoginDays = loginRow?.cnt || 0
 
-    // Commission estimate
-    const provider = getProvider(c.env)
-    const contract = getContract(c.env, provider)
-    const feeRaw: bigint = BigInt(await contract.registrationFee())
-
-    const l1TotalRaw = ((feeRaw * 40n) / 100n) * BigInt(level1Count)
-    const l2TotalRaw = ((feeRaw * 20n) / 100n) * BigInt(level2Count)
-    const l3TotalRaw = ((feeRaw * 10n) / 100n) * BigInt(level3Count)
-
-    // Notices (active, top 10)
-    const noticesRes = await db
-      .prepare(
-        'SELECT id, title, content_html, image_url, link_url, kind, priority, created_at FROM notices WHERE is_active = 1 ORDER BY priority DESC, id DESC LIMIT 10'
-      )
-      .all<{
-        id: number
-        title: string
-        content_html: string
-        image_url: string
-        link_url: string
-        kind: string
-        priority: number
-        created_at: string
-      }>()
-
-    // Mining stats from dynamic table (if exists)
-    let minerCount = 0
-    let totalDeposited = 0
-    try {
-      const res = await db
-        .prepare('SELECT fields_json FROM form_mining WHERE wallet_address = ?')
-        .bind(lower)
-        .all<{ fields_json: string }>()
-      for (const row of res.results || []) {
-        try {
-          const obj = JSON.parse(row.fields_json || '{}')
-          const amt = Number(obj?.amount_usdt || 0)
-          if (!isNaN(amt) && amt > 0) {
-            minerCount += 1
-            totalDeposited += amt
-          }
-        } catch {}
-      }
-    } catch {
-      // table may not exist yet
-    }
-
+    // শুধুই off-chain অংশ ফিরিয়ে দিচ্ছি
     return c.json({
-      userId,
+      userId: user.user_id,
       coin_balance: user.coin_balance || 0,
-      referralStats: {
-        total_referrals: totalReferrals,
-        level1_count: level1Count,
-        level2_count: level2Count,
-        level3_count: level3Count,
-      },
-      level1_list: level1Ids,
-      logins: {
-        total_login_days: totalLoginDays,
-      },
-      commissions: {
-        registration_fee_raw: feeRaw.toString(),
-        l1_total_raw: l1TotalRaw.toString(),
-        l2_total_raw: l2TotalRaw.toString(),
-        l3_total_raw: l3TotalRaw.toString(),
-        total_estimated_raw: (l1TotalRaw + l2TotalRaw + l3TotalRaw).toString(),
-        percentages: { l1: 40, l2: 20, l3: 10 },
-      },
-      notices: (noticesRes.results || []).map((n) => ({
-        id: n.id,
-        title: n.title,
-        content_html: n.content_html,
-        image_url: n.image_url,
-        link_url: n.link_url,
-        kind: n.kind || 'text',
-        priority: n.priority,
-        created_at: n.created_at,
-      })),
-      miningStats: {
-        miner_count: minerCount,
-        total_deposited: totalDeposited,
-      },
-      earningHistory: [],
+      logins: { total_login_days: totalLoginDays },
     })
   } catch (e: any) {
-    console.error('Dashboard data error:', e.stack || e.message)
-    return c.json({ error: 'Server error fetching dashboard data' }, 500)
+    console.error('GET /api/stats/:address error:', e.stack || e.message)
+    return c.json({ error: 'Server error' }, 500)
   }
 })
 
-// ---------- Referrals (Level-1 list) ----------
-app.get('/api/referrals/:walletAddress', async (c) => {
-  try {
-    const { walletAddress } = c.req.param()
-    if (!ethers.isAddress(walletAddress)) return c.json({ error: 'Invalid wallet address' }, 400)
-
-    const lower = walletAddress.toLowerCase()
-    const db = c.env.DB
-
-    const user = await db
-      .prepare('SELECT user_id FROM users WHERE wallet_address = ?')
-      .bind(lower)
-      .first<{ user_id: string }>()
-    if (!user) return c.json({ list: [] })
-
-    const level1 = await db
-      .prepare('SELECT user_id FROM users WHERE referrer_id = ? ORDER BY created_at DESC')
-      .bind(user.user_id)
-      .all<{ user_id: string }>()
-
-    const list = (level1.results || []).map((r) => r.user_id)
-    return c.json({ list })
-  } catch (e: any) {
-    console.error('GET /api/referrals/:walletAddress error:', e.stack || e.message)
-    return c.json({ list: [] })
-  }
-})
-
-// ---------- Notices: Public list ----------
+// Notices: Public list
 app.get('/api/notices', async (c) => {
   try {
     const url = new URL(c.req.url)
@@ -673,7 +313,8 @@ app.get('/api/notices', async (c) => {
     const onlyActive = url.searchParams.get('active') !== '0'
 
     const where = onlyActive ? 'WHERE is_active = 1' : ''
-    const stmt = `SELECT id, title, content_html, image_url, link_url, kind, priority, created_at FROM notices ${where} ORDER BY priority DESC, id DESC LIMIT ?`
+    const stmt = `SELECT id, title, content_html, image_url, link_url, kind, priority, created_at
+                  FROM notices ${where} ORDER BY priority DESC, id DESC LIMIT ?`
     const res = await c.env.DB.prepare(stmt).bind(limit).all()
 
     return c.json({
@@ -694,7 +335,7 @@ app.get('/api/notices', async (c) => {
   }
 })
 
-// ---------- Notices: Admin create/update (owner only, signed) ----------
+// Notices: create (owner only)
 app.post('/api/notices', async (c) => {
   try {
     const body = await c.req.json<{
@@ -709,31 +350,27 @@ app.post('/api/notices', async (c) => {
       priority?: number
       kind?: 'image' | 'text' | 'script'
     }>()
-
     const { address, timestamp, signature } = body || ({} as any)
     if (!ethers.isAddress(address)) return c.json({ error: 'Invalid address' }, 400)
     if (!timestamp || !signature) return c.json({ error: 'Missing auth params' }, 400)
-    const nowSec = Math.floor(Date.now() / 1000)
-    if (Math.abs(nowSec - Number(timestamp)) > 300)
-      return c.json({ error: 'Signature expired' }, 400)
 
-    const msg = buildAdminAuthMessage('create_notice', address, Number(timestamp))
+    // simple verify
+    const msg = `Admin action authorization
+Purpose: create_notice
+Address: ${ethers.getAddress(address)}
+Timestamp: ${Number(timestamp)}`
     await verifySignedMessage(address, msg, signature)
     await requireOwner(c.env, address)
 
     const title = (body.title || '').trim()
+    const kind = (body.kind || 'text') as 'image' | 'text' | 'script'
     const is_active = body.is_active === false ? 0 : 1
     const priority = Number.isFinite(body.priority) ? Number(body.priority) : 0
-
-    const kind = body.kind || 'text'
-    if (!['image', 'text', 'script'].includes(kind)) {
-      return c.json({ error: 'Invalid notice kind' }, 400)
-    }
-
-    const image_url = kind === 'image' ? body.image_url || '' : ''
-    const link_url = kind === 'image' ? body.link_url || '' : ''
+    const image_url = kind === 'image' ? (body.image_url || '') : ''
+    const link_url = kind === 'image' ? (body.link_url || '') : ''
     const content_html =
-      kind === 'text' ? body.content_html || '' : kind === 'script' ? body.content_html || '' : ''
+      kind === 'text' ? (body.content_html || '') :
+      kind === 'script' ? (body.content_html || '') : ''
 
     await c.env.DB.prepare(
       `INSERT INTO notices (title, content_html, image_url, link_url, kind, is_active, priority, created_at)
@@ -749,6 +386,7 @@ app.post('/api/notices', async (c) => {
   }
 })
 
+// Notices: update (owner only)
 app.patch('/api/notices/:id', async (c) => {
   try {
     const { id } = c.req.param()
@@ -764,15 +402,14 @@ app.patch('/api/notices/:id', async (c) => {
       priority?: number
       kind?: 'image' | 'text' | 'script'
     }>()
-
     const { address, timestamp, signature } = body || ({} as any)
     if (!ethers.isAddress(address)) return c.json({ error: 'Invalid address' }, 400)
     if (!timestamp || !signature) return c.json({ error: 'Missing auth params' }, 400)
-    const nowSec = Math.floor(Date.now() / 1000)
-    if (Math.abs(nowSec - Number(timestamp)) > 300)
-      return c.json({ error: 'Signature expired' }, 400)
 
-    const msg = buildAdminAuthMessage('update_notice', address, Number(timestamp))
+    const msg = `Admin action authorization
+Purpose: update_notice
+Address: ${ethers.getAddress(address)}
+Timestamp: ${Number(timestamp)}`
     await verifySignedMessage(address, msg, signature)
     await requireOwner(c.env, address)
 
@@ -790,7 +427,6 @@ app.patch('/api/notices/:id', async (c) => {
     fields.push('updated_at = ?'); values.push(new Date().toISOString())
 
     if (fields.length === 0) return c.json({ error: 'No fields to update' }, 400)
-
     const sql = `UPDATE notices SET ${fields.join(', ')} WHERE id = ?`
     values.push(Number(id))
     await c.env.DB.prepare(sql).bind(...values).run()
@@ -798,64 +434,6 @@ app.patch('/api/notices/:id', async (c) => {
     return c.json({ ok: true })
   } catch (e: any) {
     console.error('PATCH /api/notices/:id error:', e.stack || e.message)
-    return c.json({ error: 'Server error' }, 500)
-  }
-})
-
-// ---------- Dynamic form submissions ----------
-app.post('/api/forms/:formKey/submit', async (c) => {
-  try {
-    const { formKey } = c.req.param()
-    const body = await c.req.json<{ wallet_address?: string; fields: Record<string, any> }>()
-    const wallet =
-      body.wallet_address && ethers.isAddress(body.wallet_address)
-        ? ethers.getAddress(body.wallet_address)
-        : null
-    const safeKey = safeFormKey(formKey)
-
-    const table = await ensureDynamicFormTable(c.env.DB, safeKey)
-    await c.env.DB.prepare(`INSERT INTO ${table} (wallet_address, fields_json) VALUES (?, ?)`)
-      .bind(wallet ? wallet.toLowerCase() : null, JSON.stringify(body.fields || {}))
-      .run()
-
-    return c.json({ ok: true })
-  } catch (e: any) {
-    console.error('POST /api/forms/:formKey/submit error:', e.stack || e.message)
-    return c.json({ error: 'Server error' }, 500)
-  }
-})
-
-// ---------- Admin overview ----------
-app.post('/api/admin/overview', async (c) => {
-  try {
-    const body = await c.req.json<{ address: string; timestamp: number; signature: string }>()
-    const { address, timestamp, signature } = body || ({} as any)
-    if (!ethers.isAddress(address)) return c.json({ error: 'Invalid address' }, 400)
-    if (!timestamp || !signature) return c.json({ error: 'Missing auth params' }, 400)
-    const nowSec = Math.floor(Date.now() / 1000)
-    if (Math.abs(nowSec - Number(timestamp)) > 300) return c.json({ error: 'Signature expired' }, 400)
-
-    const msg = buildAdminAuthMessage('admin_overview', address, Number(timestamp))
-    await verifySignedMessage(address, msg, signature)
-    const owner = await requireOwner(c.env, address)
-
-    const db = c.env.DB
-    const totalUsersRow = await db.prepare('SELECT COUNT(*) AS cnt FROM users').first<{ cnt: number }>()
-
-    const provider = getProvider(c.env)
-    const contract = getContract(c.env, provider)
-    const balanceRaw: bigint = BigInt(await contract.getContractBalance())
-
-    return c.json({
-      ok: true,
-      owner: ethers.getAddress(owner),
-      totals: {
-        total_registered_users: totalUsersRow?.cnt || 0,
-        contract_balance_raw: balanceRaw.toString(),
-      },
-    })
-  } catch (e: any) {
-    console.error('POST /api/admin/overview error:', e.stack || e.message)
     return c.json({ error: 'Server error' }, 500)
   }
 })
