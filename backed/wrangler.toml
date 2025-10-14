@@ -1,23 +1,25 @@
-# backend/wrangler.toml
+# backed/wrangler.toml
 name = "referral-backend"
 main = "src/index.ts"
 compatibility_date = "2024-01-01"
 
+# If you have a custom domain/route, you can add:
+# routes = [
+#   { pattern = "api.yourdomain.com/*", zone_name = "yourdomain.com" }
+# ]
+
 [vars]
-# Comma-separated list of allowed origins (add your production domain here)
+# Frontend origins allowed for CORS (add your domains, comma-separated)
 ALLOWED_ORIGINS = "http://localhost:5173,https://mehedi35x.pages.dev"
 
-# Use BSC Testnet RPC to match the frontend config (chainId: 97)
+# RPC used by the backend for light reads (owner check, minimal verifies)
 BSC_RPC_URL = "https://data-seed-prebsc-1-s1.binance.org:8545/"
 
 # Must match frontend/src/config.ts
 CONTRACT_ADDRESS = "0x15f802f435C4aADEA55807687F22DbfB8f893ecB"
 
-# Optional: starting block for event scans (set deploy block if known)
-START_BLOCK = "0"
-
 [[d1_databases]]
 binding = "DB"
 database_name = "referral_db"
-# Replace with your actual D1 database ID
+# Replace with your actual D1 database id if different
 database_id = "49d6c30c-eab4-41cf-a536-6cad98bde0d8"
