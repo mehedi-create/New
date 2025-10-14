@@ -1,10 +1,11 @@
 // frontend/src/pages/Register.tsx
-import React, { useState, useEffect } from 'react';
-import { useSearchParams, useNavigate } from 'react-router-dom';
-import { useWallet } from '../context/WalletContext';
-import { config } from '../config';
-import { approveUSDT, registerUser } from '../utils/contract';
-import { showSuccessToast, showErrorToast } from '../utils/notification';
+import React, { useState, useEffect } from 'react'
+import { useSearchParams, useNavigate } from 'react-router-dom'
+import { useWallet } from '../context/WalletContext'
+import { config } from '../config'
+import { approveUSDT, registerUser, signAuthMessage } from '../utils/contract'
+import { showSuccessToast, showErrorToast } from '../utils/notification'
+import { upsertUserFromChain } from '../services/api'
 
 const colors = {
   bgLightGreen: '#e8f9f1',
@@ -16,9 +17,9 @@ const colors = {
   white: '#ffffff',
   danger: '#b91c1c',
   mutedGray: '#eef2f6',
-};
+}
 
-type Style = React.CSSProperties;
+type Style = React.CSSProperties
 const styles: Record<string, Style> = {
   page: {
     minHeight: '100vh',
@@ -171,63 +172,62 @@ const styles: Record<string, Style> = {
     fontSize: 12,
     color: colors.navySoft,
   },
-};
+}
 
-// CSS keyframe for spinner (inline)
 const injectSpinnerKeyframes = () => {
-  const id = 'kf-spin';
-  if (document.getElementById(id)) return;
-  const style = document.createElement('style');
-  style.id = id;
-  style.innerHTML = `@keyframes spin { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }`;
-  document.head.appendChild(style);
-};
+  const id = 'kf-spin'
+  if (document.getElementById(id)) return
+  const style = document.createElement('style')
+  style.id = id
+  style.innerHTML = `@keyframes spin { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }`
+  document.head.appendChild(style)
+}
 
-const EXACT_LEN = 6; // Smart contract currently requires exactly 6 chars
+const EXACT_LEN = 6 // Smart contract currently requires exactly 6 chars
 
 const Register: React.FC = () => {
-  const [searchParams] = useSearchParams();
-  const navigate = useNavigate();
-  const { account, refreshStatus } = useWallet();
+  const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
+  const { account, refreshStatus } = useWallet()
 
-  const [userId, setUserId] = useState('');
-  const [referralCode, setReferralCode] = useState('');
-  const [referralLocked, setReferralLocked] = useState(false);
-  const [fundCode, setFundCode] = useState('');
-  const [confirmFundCode, setConfirmFundCode] = useState('');
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [loadingMessage, setLoadingMessage] = useState('');
-  const [isFormValid, setIsFormValid] = useState(false);
+  const [userId, setUserId] = useState('')
+  const [referralCode, setReferralCode] = useState('')
+  const [referralLocked, setReferralLocked] = useState(false)
+  const [fundCode, setFundCode] = useState('')
+  const [confirmFundCode, setConfirmFundCode] = useState('')
+  const [isProcessing, setIsProcessing] = useState(false)
+  const [loadingMessage, setLoadingMessage] = useState('')
+  const [isFormValid, setIsFormValid] = useState(false)
 
   useEffect(() => {
-    injectSpinnerKeyframes();
-  }, []);
+    injectSpinnerKeyframes()
+  }, [])
 
   // Prefill ref from URL and lock if valid
   useEffect(() => {
-    const ref = (searchParams.get('ref') || '').toUpperCase().trim();
+    const ref = (searchParams.get('ref') || '').toUpperCase().trim()
     if (ref) {
-      setReferralCode(ref);
+      setReferralCode(ref)
       if (ref.length === EXACT_LEN) {
-        setReferralLocked(true);
+        setReferralLocked(true)
       }
     }
-  }, [searchParams]);
+  }, [searchParams])
 
   // Block copy/select/context menu on this page
   useEffect(() => {
-    const prevent = (e: Event) => e.preventDefault();
-    document.addEventListener('copy', prevent);
-    document.addEventListener('cut', prevent);
-    document.addEventListener('contextmenu', prevent);
-    document.addEventListener('selectstart', prevent);
+    const prevent = (e: Event) => e.preventDefault()
+    document.addEventListener('copy', prevent)
+    document.addEventListener('cut', prevent)
+    document.addEventListener('contextmenu', prevent)
+    document.addEventListener('selectstart', prevent)
     return () => {
-      document.removeEventListener('copy', prevent);
-      document.removeEventListener('cut', prevent);
-      document.removeEventListener('contextmenu', prevent);
-      document.removeEventListener('selectstart', prevent);
-    };
-  }, []);
+      document.removeEventListener('copy', prevent)
+      document.removeEventListener('cut', prevent)
+      document.removeEventListener('contextmenu', prevent)
+      document.removeEventListener('selectstart', prevent)
+    }
+  }, [])
 
   // Validate inputs (exact 6 to match contract)
   useEffect(() => {
@@ -235,39 +235,43 @@ const Register: React.FC = () => {
       userId.trim().length === EXACT_LEN &&
       referralCode.trim().length === EXACT_LEN &&
       fundCode.trim().length >= 4 &&
-      fundCode === confirmFundCode;
-    setIsFormValid(valid);
-  }, [userId, referralCode, fundCode, confirmFundCode]);
+      fundCode === confirmFundCode
+    setIsFormValid(valid)
+  }, [userId, referralCode, fundCode, confirmFundCode])
 
   const handleRegister = async () => {
     if (!account) {
-      showErrorToast('Please connect your wallet first.');
-      return;
+      showErrorToast('Please connect your wallet first.')
+      return
     }
     if (!isFormValid) {
-      showErrorToast('Please fill all fields correctly.');
-      return;
+      showErrorToast('Please fill all fields correctly.')
+      return
     }
 
-    setIsProcessing(true);
+    setIsProcessing(true)
     try {
-      setLoadingMessage(`Preparing payment of ${config.registrationFee} USDT... (Approval)`);
-      const approveTx = await approveUSDT(config.registrationFee);
-      await approveTx.wait();
+      setLoadingMessage(`Preparing payment of ${config.registrationFee} USDT... (Approval)`)
+      const approveTx = await approveUSDT(config.registrationFee)
+      await approveTx.wait()
 
-      setLoadingMessage('Submitting your registration...');
-      const registerTx = await registerUser(userId, referralCode, fundCode);
-      await registerTx.wait();
+      setLoadingMessage('Submitting your registration...')
+      const registerTx = await registerUser(userId, referralCode, fundCode)
+      await registerTx.wait()
 
-      showSuccessToast('Registration successful! Redirecting to dashboard...');
-      await refreshStatus();
-      navigate('/dashboard', { replace: true });
+      // NEW: immediately sync with backend so dashboard doesn’t 404
+      const { timestamp, signature } = await signAuthMessage(account)
+      await upsertUserFromChain(account, timestamp, signature)
+
+      showSuccessToast('Registration successful! Redirecting to dashboard...')
+      await refreshStatus()
+      navigate('/dashboard', { replace: true })
     } catch (error: any) {
-      showErrorToast(error, 'Registration failed');
+      showErrorToast(error, 'Registration failed')
     } finally {
-      setIsProcessing(false);
+      setIsProcessing(false)
     }
-  };
+  }
 
   return (
     <div style={styles.page}>
@@ -285,7 +289,9 @@ const Register: React.FC = () => {
       <div style={styles.wrap}>
         <header style={styles.header}>
           <h1 style={styles.title}>Create your Web3 account</h1>
-          <p style={styles.tagline}>A clean, fair and community‑driven space—powered by smart contracts.</p>
+          <p style={styles.tagline}>
+            A clean, fair and community‑driven space—powered by smart contracts.
+          </p>
         </header>
 
         <div style={styles.grid}>
@@ -308,7 +314,10 @@ const Register: React.FC = () => {
                   style={styles.input}
                   disabled={isProcessing}
                 />
-                <span style={styles.hint}>Use uppercase letters/numbers. This must be exactly {EXACT_LEN} to match the smart contract.</span>
+                <span style={styles.hint}>
+                  Use uppercase letters/numbers. This must be exactly {EXACT_LEN} to match the smart
+                  contract.
+                </span>
               </div>
 
               <div style={styles.inputGroup}>
@@ -321,7 +330,7 @@ const Register: React.FC = () => {
                   value={referralCode}
                   maxLength={EXACT_LEN}
                   onChange={(e) => {
-                    if (!referralLocked) setReferralCode(e.target.value.toUpperCase());
+                    if (!referralLocked) setReferralCode(e.target.value.toUpperCase())
                   }}
                   placeholder="Enter your referrer’s ID"
                   style={{
@@ -333,12 +342,16 @@ const Register: React.FC = () => {
                 {referralLocked ? (
                   <span style={styles.hint}>Referral ID set from link and locked.</span>
                 ) : (
-                  <span style={styles.hint}>If you arrived via a referral link, this will auto‑fill and lock.</span>
+                  <span style={styles.hint}>
+                    If you arrived via a referral link, this will auto‑fill and lock.
+                  </span>
                 )}
               </div>
 
               <div style={styles.inputGroup}>
-                <label htmlFor="fundCode" style={styles.label}>Fund Code (min 4 chars)</label>
+                <label htmlFor="fundCode" style={styles.label}>
+                  Fund Code (min 4 chars)
+                </label>
                 <input
                   id="fundCode"
                   type="password"
@@ -349,13 +362,18 @@ const Register: React.FC = () => {
                   disabled={isProcessing}
                 />
                 <span style={styles.dangerText}>
-                  WARNING: This code is required for withdrawals. If you lose it, it cannot be recovered by anyone.
+                  WARNING: This code is required for withdrawals. If you lose it, it cannot be
+                  recovered by anyone.
                 </span>
-                <span style={styles.hint}>Write it down and store it safely. Do not share with anyone.</span>
+                <span style={styles.hint}>
+                  Write it down and store it safely. Do not share with anyone.
+                </span>
               </div>
 
               <div style={styles.inputGroup}>
-                <label htmlFor="confirmFundCode" style={styles.label}>Confirm Fund Code</label>
+                <label htmlFor="confirmFundCode" style={styles.label}>
+                  Confirm Fund Code
+                </label>
                 <input
                   id="confirmFundCode"
                   type="password"
@@ -374,8 +392,12 @@ const Register: React.FC = () => {
                   ...styles.button,
                   ...(isFormValid && !isProcessing ? {} : styles.buttonDisabled),
                 }}
-                onMouseOver={(e) => { (e.currentTarget as HTMLButtonElement).style.background = colors.accentDark; }}
-                onMouseOut={(e) => { (e.currentTarget as HTMLButtonElement).style.background = colors.accent; }}
+                onMouseOver={(e) => {
+                  ;(e.currentTarget as HTMLButtonElement).style.background = colors.accentDark
+                }}
+                onMouseOut={(e) => {
+                  ;(e.currentTarget as HTMLButtonElement).style.background = colors.accent
+                }}
               >
                 Register Now — {config.registrationFee} USDT
               </button>
@@ -386,8 +408,10 @@ const Register: React.FC = () => {
           <section style={styles.panel}>
             <h2 style={styles.sectionTitle}>Why the $12 USDT fee?</h2>
             <p style={styles.hint}>
-              To keep our decentralized community healthy and spam‑free, we require a small, one‑time registration fee of <strong>{config.registrationFee} USDT</strong>.
-              This helps prevent bot signups, protects genuine members, and improves the overall quality of the network.
+              To keep our decentralized community healthy and spam‑free, we require a small,
+              one‑time registration fee of <strong>{config.registrationFee} USDT</strong>. This helps
+              prevent bot signups, protects genuine members, and improves the overall quality of the
+              network.
             </p>
             <div style={styles.feeBox}>
               What you’ll need:
@@ -399,13 +423,14 @@ const Register: React.FC = () => {
               </ul>
             </div>
             <p style={{ ...styles.smallNote, marginTop: 8 }}>
-              Note: IDs longer than {EXACT_LEN} are not supported by the current smart contract. If you need 6–8 later, we must deploy a new contract.
+              Note: IDs longer than {EXACT_LEN} are not supported by the current smart contract. If
+              you need 6–8 later, we must deploy a new contract.
             </p>
           </section>
         </div>
       </div>
     </div>
-  );
-};
+  )
+}
 
-export default Register;
+export default Register
