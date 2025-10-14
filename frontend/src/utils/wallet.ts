@@ -12,6 +12,7 @@ declare global {
 export const isValidAddress = (a?: string | null) =>
   typeof a === 'string' && /^0x[0-9a-fA-F]{40}$/.test(a)
 
+// Get injected provider (MetaMask/Wallet)
 const getProvider = (): BrowserProvider | null => {
   if (typeof window === 'undefined' || !window.ethereum) {
     console.warn('Wallet provider (window.ethereum) not found.')
@@ -23,7 +24,7 @@ const getProvider = (): BrowserProvider | null => {
 export const connectWallet = async (): Promise<string> => {
   const provider = getProvider()
   if (!provider) {
-    throw new Error('Wallet not found. Please install MetaMask or a compatible browser extension.')
+    throw new Error('Wallet not found. Please install MetaMask or a compatible wallet.')
   }
 
   try {
@@ -55,7 +56,7 @@ export const switchToBSC = async (): Promise<void> => {
       params: [{ chainId: targetChainIdHex }],
     })
   } catch (error: any) {
-    // 4902: Unrecognized chain
+    // 4902: Unrecognized chain → add then retry
     if (error?.code === 4902) {
       try {
         const isMainnet = config.chainId === 56
