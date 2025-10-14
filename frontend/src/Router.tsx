@@ -1,130 +1,61 @@
 // frontend/src/Router.tsx
-import React, { useEffect } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
-import { useWallet } from './context/WalletContext';
+import React, { Suspense, lazy, useEffect } from 'react'
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import { useWallet } from './context/WalletContext'
 
-import Login from './pages/Login';
-import Register from './pages/Register';
-import Dashboard from './pages/Dashboard';
+const Login = lazy(() => import('./pages/Login'))
+const Register = lazy(() => import('./pages/Register'))
+const Dashboard = lazy(() => import('./pages/Dashboard'))
 
-const colors = {
-  bgLightGreen: '#e8f9f1',
-  bgLightGreen2: '#e0f5ed',
-  deepNavy: '#0b1b3b',
-  navySoft: '#163057',
-};
-
-const appShellStyle: React.CSSProperties = {
-  minHeight: '100vh',
-  width: '100%',
-  background: `linear-gradient(180deg, ${colors.bgLightGreen} 0%, ${colors.bgLightGreen2} 100%)`,
-  color: colors.deepNavy,
-};
-
-const LoadingScreen: React.FC = () => (
-  <div
-    style={{
-      ...appShellStyle,
-      display: 'flex',
-      justifyContent: 'center',
-      alignItems: 'center',
-      fontSize: '1.05rem',
-    }}
-  >
-    Checking status...
+const Loader: React.FC<{ text?: string }> = ({ text = 'Loading…' }) => (
+  <div style={{
+    minHeight: '60vh',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontWeight: 800,
+    color: '#163057',
+  }}>
+    {text}
   </div>
-);
+)
 
-export const AppRouter: React.FC = () => {
-  const { account, onChainStatus, isCheckingStatus } = useWallet();
+// Scroll to top on route change
+const ScrollToTop: React.FC = () => {
+  const { pathname } = useLocation()
+  useEffect(() => { window.scrollTo({ top: 0, behavior: 'instant' as any }) }, [pathname])
+  return null
+}
 
-  // Global: block copy/cut/select/context menu/drag; apply global colors
-  useEffect(() => {
-    const prevent = (e: Event) => e.preventDefault();
+const Protected: React.FC<{ children: React.ReactElement }> = ({ children }) => {
+  const { account } = useWallet()
+  if (!account) return <Navigate to="/login" replace />
+  return children
+}
 
-    document.addEventListener('copy', prevent);
-    document.addEventListener('cut', prevent);
-    document.addEventListener('contextmenu', prevent);
-    document.addEventListener('selectstart', prevent);
-    document.addEventListener('dragstart', prevent);
-
-    // apply body styles
-    const prev = {
-      bg: document.body.style.background,
-      color: document.body.style.color,
-      userSelect: (document.body.style as any).userSelect,
-      webkitUserSelect: (document.body.style as any).webkitUserSelect,
-      mozUserSelect: (document.body.style as any).MozUserSelect,
-      msUserSelect: (document.body.style as any).msUserSelect,
-    };
-    document.body.style.background = `linear-gradient(180deg, ${colors.bgLightGreen} 0%, ${colors.bgLightGreen2} 100%)`;
-    document.body.style.color = colors.deepNavy;
-    (document.body.style as any).userSelect = 'none';
-    (document.body.style as any).webkitUserSelect = 'none';
-    (document.body.style as any).MozUserSelect = 'none';
-    (document.body.style as any).msUserSelect = 'none';
-
-    return () => {
-      document.removeEventListener('copy', prevent);
-      document.removeEventListener('cut', prevent);
-      document.removeEventListener('contextmenu', prevent);
-      document.removeEventListener('selectstart', prevent);
-      document.removeEventListener('dragstart', prevent);
-
-      document.body.style.background = prev.bg;
-      document.body.style.color = prev.color;
-      (document.body.style as any).userSelect = prev.userSelect;
-      (document.body.style as any).webkitUserSelect = prev.webkitUserSelect;
-      (document.body.style as any).MozUserSelect = prev.mozUserSelect;
-      (document.body.style as any).msUserSelect = prev.msUserSelect;
-    };
-  }, []);
-
-  if (isCheckingStatus) {
-    return <LoadingScreen />;
-  }
-
+const AppRouter: React.FC = () => {
   return (
-    <div style={appShellStyle}>
-      <Routes>
-        <Route
-          path="/"
-          element={
-            !account ? (
-              <Login />
-            ) : onChainStatus === 'registered' ? (
-              <Navigate to="/dashboard" replace />
-            ) : (
-              <Navigate to="/register" replace />
-            )
-          }
-        />
-        <Route
-          path="/register"
-          element={
-            !account ? (
-              <Navigate to="/" replace />
-            ) : onChainStatus === 'registered' ? (
-              <Navigate to="/dashboard" replace />
-            ) : (
-              <Register />
-            )
-          }
-        />
-        <Route
-          path="/dashboard"
-          element={
-            !account ? (
-              <Navigate to="/" replace />
-            ) : onChainStatus === 'unregistered' ? (
-              <Navigate to="/register" replace />
-            ) : (
-              <Dashboard />
-            )
-          }
-        />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </div>
-  );
-};
+    <BrowserRouter>
+      <ScrollToTop />
+      <Suspense fallback={<Loader />}>
+        <Routes>
+          <Route path="/" element={<Navigate to="/login" replace />} />
+          <Route path="/login" element={<Login />} />
+          {/* Allow open access to Register (page itself enforces wallet before submit) */}
+          <Route path="/register" element={<Register />} />
+          <Route
+            path="/dashboard"
+            element={
+              <Protected>
+                <Dashboard />
+              </Protected>
+            }
+          />
+          <Route path="*" element={<Navigate to="/login" replace />} />
+        </Routes>
+      </Suspense>
+    </BrowserRouter>
+  )
+}
+
+export default AppRouter
