@@ -27,103 +27,55 @@ interface WalletContextType {
 
 const WalletContext = createContext<WalletContextType | undefined>(undefined)
 
-// Wait for injected provider (MetaMask/Coinbase, etc.)
-const getEthereumProvider = (): Promise<any> => {
-  return new Promise((resolve) => {
-    if ((window as any).ethereum) {
-      resolve((window as any).ethereum)
-    } else {
-      window.addEventListener('ethereum#initialized', () => resolve((window as any).ethereum), {
-        once: true,
-      })
-      setTimeout(() => resolve((window as any).ethereum || null), 3000)
-    }
-  })
-}
-
 export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [account, setAccount] = useState<string | null>(null)
   const [isConnecting, setIsConnecting] = useState(false)
-  const [isCheckingStatus, setIsCheckingStatus] = useState(false) // no auto-check on load
+  const [isCheckingStatus, setIsCheckingStatus] = useState(false)
   const [onChainStatus, setOnChainStatus] = useState<OnChainStatus>('unregistered')
   const [userId, setUserId] = useState<string | null>(null)
   const queryClient = useQueryClient()
 
   const checkOnChainStatus = useCallback(async (address: string) => {
+    if (!isValidAddress(address)) {
+      setOnChainStatus('unregistered')
+      setUserId(null)
+      return
+    }
     setIsCheckingStatus(true)
     setOnChainStatus('checking')
-    setUserId(null)
     try {
-      const registered = await isRegistered(address)
-      if (registered) {
+      const reg = await isRegistered(address)
+      if (reg) {
         const id = await getUserIdFromChain(address)
-        setUserId(id)
+        setUserId(id || null)
         setOnChainStatus('registered')
       } else {
+        setUserId(null)
         setOnChainStatus('unregistered')
       }
-    } catch (error) {
-      console.error('On-chain check failed:', error)
+    } catch (err) {
+      console.warn('checkOnChainStatus failed:', err)
+      setUserId(null)
       setOnChainStatus('unregistered')
     } finally {
       setIsCheckingStatus(false)
     }
   }, [])
 
-  // Minimal listeners: do not auto-check; only reflect account change
-  useEffect(() => {
-    const setup = async () => {
-      const ethereum = await getEthereumProvider()
-      if (!ethereum?.on) return
-
-      const handleAccountsChanged = (accounts: string[]) => {
-        const raw = accounts.length > 0 ? accounts[0] : null
-        const newAccount = isValidAddress(raw) ? raw!.toLowerCase() : null
-        setAccount(newAccount)
-        if (!newAccount) {
-          setOnChainStatus('unregistered')
-          setUserId(null)
-          queryClient.clear()
-        } else {
-          setOnChainStatus('unregistered')
-          setUserId(null)
-        }
-      }
-
-      const handleChainChanged = () => {
-        setOnChainStatus('unregistered')
-      }
-
-      ethereum.on('accountsChanged', handleAccountsChanged)
-      ethereum.on('chainChanged', handleChainChanged)
-
-      return () => {
-        try {
-          ethereum.removeListener('accountsChanged', handleAccountsChanged)
-          ethereum.removeListener('chainChanged', handleChainChanged)
-        } catch {}
-      }
-    }
-
-    setup()
-  }, [queryClient])
-
+  // Wallet connect
   const connect = async () => {
     if (isConnecting) return
     setIsConnecting(true)
     try {
-      const ethereum = await getEthereumProvider()
-      if (!ethereum) {
-        throw new Error('Wallet not found. Please install MetaMask or use a Web3-enabled browser.')
-      }
       await switchToBSC()
-      const newAccount = await connectWallet()
-      const normalized = isValidAddress(newAccount) ? newAccount.toLowerCase() : null
-      if (!normalized) throw new Error('Invalid wallet address from provider.')
+      const addr = await connectWallet()
+      const normalized = isValidAddress(addr) ? addr.toLowerCase() : null
+      if (!normalized) throw new Error('Invalid wallet address returned by provider.')
       setAccount(normalized)
+      // One-time status check on user action (no polling)
       await checkOnChainStatus(normalized)
-    } catch (error: any) {
-      showErrorToast(error)
+    } catch (err: any) {
+      showErrorToast(err)
     } finally {
       setIsConnecting(false)
     }
@@ -131,9 +83,12 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
   const disconnect = () => {
     setAccount(null)
-    setOnChainStatus('unregistered')
     setUserId(null)
-    queryClient.clear()
+    setOnChainStatus('unregistered')
+    // Clear all cached queries to avoid stale data cross-account
+    try {
+      queryClient.clear()
+    } catch {}
   }
 
   const refreshStatus = async () => {
@@ -142,7 +97,40 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     }
   }
 
-  const contextValue: WalletContextType = {
+  // Listen for wallet/chain changes (lightweight)
+  useEffect(() => {
+    const eth = (window as any)?.ethereum
+    if (!eth?.on) return
+
+    const handleAccountsChanged = (accounts: string[]) => {
+      const raw = accounts?.[0] || null
+      const next = isValidAddress(raw) ? raw!.toLowerCase() : null
+      setAccount(next)
+      setUserId(null)
+      setOnChainStatus('unregistered')
+      // wipe cache on account switch
+      try {
+        queryClient.clear()
+      } catch {}
+    }
+
+    const handleChainChanged = () => {
+      // Don’t hard reload; just mark status unknown
+      setOnChainStatus('unregistered')
+    }
+
+    eth.on('accountsChanged', handleAccountsChanged)
+    eth.on('chainChanged', handleChainChanged)
+
+    return () => {
+      try {
+        eth.removeListener('accountsChanged', handleAccountsChanged)
+        eth.removeListener('chainChanged', handleChainChanged)
+      } catch {}
+    }
+  }, [queryClient])
+
+  const ctx: WalletContextType = {
     account,
     connect,
     disconnect,
@@ -153,13 +141,11 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     refreshStatus,
   }
 
-  return <WalletContext.Provider value={contextValue}>{children}</WalletContext.Provider>
+  return <WalletContext.Provider value={ctx}>{children}</WalletContext.Provider>
 }
 
 export const useWallet = (): WalletContextType => {
-  const context = useContext(WalletContext)
-  if (context === undefined) {
-    throw new Error('useWallet must be used within a WalletProvider')
-  }
-  return context
+  const ctx = useContext(WalletContext)
+  if (!ctx) throw new Error('useWallet must be used within a WalletProvider')
+  return ctx
 }
