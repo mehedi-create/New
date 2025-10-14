@@ -187,7 +187,7 @@ const styles: Record<string, React.CSSProperties & Record<string, any>> = {
   },
 }
 
-// moved out of styles to avoid callable type error
+// stepDot ফাংশন styles-এর বাইরে রাখা হলো (TS callable এরর ফিক্স)
 const styleStepDot = (bg: string): React.CSSProperties => ({
   width: 12,
   height: 12,
@@ -213,6 +213,23 @@ const DangerousHtml: React.FC<{ html: string }> = ({ html }) => {
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+// helper: axios timeout/ECONNABORTED ইত্যাদি ধরতে
+const isTimeoutLikeError = (e: any) => {
+  const msg = String(e?.message || '').toLowerCase()
+  const code = String(e?.code || '').toLowerCase()
+  return (
+    msg.includes('timeout') ||
+    msg.includes('exceeded') ||
+    code.includes('timeout') ||
+    code.includes('ecconnaborted') ||
+    code.includes('etimedout')
+  )
+}
+
+// Verify ধাপটি সর্বোচ্চ ২ মিনিট চেষ্টা করবে
+const VERIFY_TOTAL_MS = 120000
+const VERIFY_POLL_BASE_MS = 3000 // প্রতি ইটারেশনে 3s~5s
 
 const Dashboard: React.FC = () => {
   const { account, userId, disconnect } = useWallet()
@@ -309,21 +326,21 @@ const Dashboard: React.FC = () => {
     },
   })
 
-  // Notices (public)
+  // Notices (public) — 2 মিনিট থেকে 1 মিনিটে নামানো হলো
   const { data: notices = [] } = useQuery<Notice[]>({
     queryKey: ['notices'],
     queryFn: async () => {
       const res = await getNotices({ limit: 10, active: 1 })
       return (res.data?.notices || []) as Notice[]
     },
-    refetchInterval: 120000,
+    refetchInterval: 60000, // ছিল 120000
   })
 
-  // L1 referrals from chain (userId list)
+  // L1 referrals from chain (userId list) — 2 মিনিট থেকে 1 মিনিটে
   const { data: referralList = [], isLoading: isRefsLoading } = useQuery<string[]>({
     queryKey: ['referralsL1', account],
     enabled: isValidAddress(account),
-    refetchInterval: 120000,
+    refetchInterval: 60000, // ছিল 120000
     queryFn: async () => {
       if (!isValidAddress(account)) return []
       return getLevel1ReferralIdsFromChain(account!)
@@ -386,21 +403,41 @@ const Dashboard: React.FC = () => {
       await sleep(250)
 
       // 2) Submit upsert (backend queued)
-      await upsertUserFromChain(account!, timestamp, signature)
+      try {
+        await upsertUserFromChain(account!, timestamp, signature)
+        // success
+      } catch (e) {
+        // টাইমআউট হলে ব্লক না করে কন্টিনিউ করা হবে
+        if (isTimeoutLikeError(e)) {
+          // UI-তে timeout মেসেজ দেখাব না; verify চালিয়ে যাব
+          console.warn('Upsert request timed out, continuing to verify...')
+        } else {
+          throw e
+        }
+      }
       setSteps((s) => ({ ...s, submit: 'done', verify: 'running' }))
 
-      // 3) Verify by polling stats (3 tries, backoff)
-      const delays = [800, 1600, 2600]
+      // 3) Verify by polling up to 2 minutes
+      const deadline = Date.now() + VERIFY_TOTAL_MS
       let ok = false
-      for (let d of delays) {
-        await sleep(d)
+      let attempt = 0
+      while (Date.now() < deadline) {
+        const delay = Math.min(VERIFY_POLL_BASE_MS + attempt * 500, 5000)
+        await sleep(delay)
+        attempt++
         try {
           const res = await getStats(account!)
           if (res?.data?.userId) {
             ok = true
             break
           }
-        } catch {}
+        } catch (e) {
+          // নেটওয়ার্ক/টাইমআউট হলে ইগনোর করে পুনরায় চেষ্টা
+          if (!isTimeoutLikeError(e)) {
+            // অন্য এরর হলে শুধু কনসোলে লগ, লুপ কন্টিনিউ
+            console.warn('verify poll error:', e)
+          }
+        }
       }
 
       if (!ok) {
@@ -408,18 +445,25 @@ const Dashboard: React.FC = () => {
         await refetchStats()
       }
 
-      setSteps((s) => ({ ...s, verify: 'done' }))
+      setSteps((s) => ({ ...s, verify: ok ? 'done' : 'error' }))
       setLastSyncAt(Date.now())
       await queryClient.invalidateQueries({ queryKey: ['stats', account] })
-      setShowSignModal(false)
-      showSuccessToast('Your data has been synced successfully.')
-    } catch (e) {
+
+      if (ok) {
+        setShowSignModal(false)
+        showSuccessToast('Your data has been synced successfully.')
+      } else {
+        setSyncError('Verification took longer than expected. Please try again.')
+      }
+    } catch (e: any) {
       setSteps((s) => ({
         ...s,
         sign: s.sign === 'running' ? 'error' : s.sign,
         submit: s.submit === 'running' ? 'error' : s.submit,
       }))
-      setSyncError(typeof (e as any)?.message === 'string' ? (e as any).message : 'Sync failed')
+      // টাইমআউট মেসেজ সরাসরি দেখাব না
+      const msg = isTimeoutLikeError(e) ? '' : (typeof e?.message === 'string' ? e.message : 'Sync failed')
+      setSyncError(msg)
     } finally {
       setSyncInProgress(false)
     }
@@ -553,7 +597,7 @@ const Dashboard: React.FC = () => {
               <div>
                 <div style={{ fontWeight: 800 }}>Step 3 — Verify & finish</div>
                 <div style={{ fontSize: 12, color: colors.navySoft }}>
-                  We’ll verify and refresh the dashboard automatically.
+                  We’ll verify (up to 2 minutes) and refresh the dashboard automatically.
                 </div>
               </div>
             </div>
