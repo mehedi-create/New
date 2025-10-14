@@ -2,10 +2,11 @@
 import React, { useState, useEffect } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import { useWallet } from '../context/WalletContext'
-import { config } from '../config'
-import { approveUSDT, registerUser, signAuthMessage } from '../utils/contract'
-import { showSuccessToast, showErrorToast } from '../utils/notification'
+import { approveUSDT, registerUser, getRegistrationFee, signAuthMessage } from '../utils/contract'
 import { upsertUserFromChain } from '../services/api'
+import { showSuccessToast, showErrorToast } from '../utils/notification'
+import { isValidAddress } from '../utils/wallet'
+import { config } from '../config'
 
 const colors = {
   bgLightGreen: '#e8f9f1',
@@ -174,6 +175,7 @@ const styles: Record<string, Style> = {
   },
 }
 
+// CSS keyframe for spinner (inline)
 const injectSpinnerKeyframes = () => {
   const id = 'kf-spin'
   if (document.getElementById(id)) return
@@ -198,9 +200,20 @@ const Register: React.FC = () => {
   const [isProcessing, setIsProcessing] = useState(false)
   const [loadingMessage, setLoadingMessage] = useState('')
   const [isFormValid, setIsFormValid] = useState(false)
+  const [fee, setFee] = useState<string>(config.registrationFee || '12')
 
   useEffect(() => {
     injectSpinnerKeyframes()
+  }, [])
+
+  useEffect(() => {
+    // Load latest fee from chain (lightweight read)
+    ;(async () => {
+      try {
+        const f = await getRegistrationFee()
+        if (Number(f) > 0) setFee(f)
+      } catch {}
+    })()
   }, [])
 
   // Prefill ref from URL and lock if valid
@@ -229,7 +242,7 @@ const Register: React.FC = () => {
     }
   }, [])
 
-  // Validate inputs (exact 6 to match contract)
+  // Validate inputs
   useEffect(() => {
     const valid =
       userId.trim().length === EXACT_LEN &&
@@ -240,7 +253,7 @@ const Register: React.FC = () => {
   }, [userId, referralCode, fundCode, confirmFundCode])
 
   const handleRegister = async () => {
-    if (!account) {
+    if (!isValidAddress(account)) {
       showErrorToast('Please connect your wallet first.')
       return
     }
@@ -251,17 +264,19 @@ const Register: React.FC = () => {
 
     setIsProcessing(true)
     try {
-      setLoadingMessage(`Preparing payment of ${config.registrationFee} USDT... (Approval)`)
-      const approveTx = await approveUSDT(config.registrationFee)
+      // 1) Approve USDT
+      setLoadingMessage(`Preparing payment of ${fee} USDT... (Approval)`)
+      const approveTx = await approveUSDT(fee)
       await approveTx.wait()
 
+      // 2) Register on-chain
       setLoadingMessage('Submitting your registration...')
-      const registerTx = await registerUser(userId, referralCode, fundCode)
+      const registerTx = await registerUser(userId.trim().toUpperCase(), referralCode.trim().toUpperCase(), fundCode)
       await registerTx.wait()
 
-      // NEW: immediately sync with backend so dashboard doesn’t 404
-      const { timestamp, signature } = await signAuthMessage(account)
-      await upsertUserFromChain(account, timestamp, signature)
+      // 3) Upsert off-chain (signed) — lightweight, queued on server
+      const { timestamp, signature } = await signAuthMessage(account!)
+      await upsertUserFromChain(account!, timestamp, signature)
 
       showSuccessToast('Registration successful! Redirecting to dashboard...')
       await refreshStatus()
@@ -342,16 +357,12 @@ const Register: React.FC = () => {
                 {referralLocked ? (
                   <span style={styles.hint}>Referral ID set from link and locked.</span>
                 ) : (
-                  <span style={styles.hint}>
-                    If you arrived via a referral link, this will auto‑fill and lock.
-                  </span>
+                  <span style={styles.hint}>If you arrived via a referral link, this will auto‑fill and lock.</span>
                 )}
               </div>
 
               <div style={styles.inputGroup}>
-                <label htmlFor="fundCode" style={styles.label}>
-                  Fund Code (min 4 chars)
-                </label>
+                <label htmlFor="fundCode" style={styles.label}>Fund Code (min 4 chars)</label>
                 <input
                   id="fundCode"
                   type="password"
@@ -362,18 +373,13 @@ const Register: React.FC = () => {
                   disabled={isProcessing}
                 />
                 <span style={styles.dangerText}>
-                  WARNING: This code is required for withdrawals. If you lose it, it cannot be
-                  recovered by anyone.
+                  WARNING: This code is required for withdrawals. If you lose it, it cannot be recovered by anyone.
                 </span>
-                <span style={styles.hint}>
-                  Write it down and store it safely. Do not share with anyone.
-                </span>
+                <span style={styles.hint}>Write it down and store it safely. Do not share with anyone.</span>
               </div>
 
               <div style={styles.inputGroup}>
-                <label htmlFor="confirmFundCode" style={styles.label}>
-                  Confirm Fund Code
-                </label>
+                <label htmlFor="confirmFundCode" style={styles.label}>Confirm Fund Code</label>
                 <input
                   id="confirmFundCode"
                   type="password"
@@ -392,26 +398,20 @@ const Register: React.FC = () => {
                   ...styles.button,
                   ...(isFormValid && !isProcessing ? {} : styles.buttonDisabled),
                 }}
-                onMouseOver={(e) => {
-                  ;(e.currentTarget as HTMLButtonElement).style.background = colors.accentDark
-                }}
-                onMouseOut={(e) => {
-                  ;(e.currentTarget as HTMLButtonElement).style.background = colors.accent
-                }}
+                onMouseOver={(e) => { (e.currentTarget as HTMLButtonElement).style.background = colors.accentDark }}
+                onMouseOut={(e) => { (e.currentTarget as HTMLButtonElement).style.background = colors.accent }}
               >
-                Register Now — {config.registrationFee} USDT
+                Register Now — {fee} USDT
               </button>
             </div>
           </section>
 
           {/* Fee explanation below */}
           <section style={styles.panel}>
-            <h2 style={styles.sectionTitle}>Why the $12 USDT fee?</h2>
+            <h2 style={styles.sectionTitle}>Why the {fee} USDT fee?</h2>
             <p style={styles.hint}>
-              To keep our decentralized community healthy and spam‑free, we require a small,
-              one‑time registration fee of <strong>{config.registrationFee} USDT</strong>. This helps
-              prevent bot signups, protects genuine members, and improves the overall quality of the
-              network.
+              To keep our decentralized community healthy and spam‑free, we require a small, one‑time registration fee of <strong>{fee} USDT</strong>.
+              This helps prevent bot signups, protects genuine members, and improves the overall quality of the network.
             </p>
             <div style={styles.feeBox}>
               What you’ll need:
@@ -419,12 +419,11 @@ const Register: React.FC = () => {
                 <li>Exactly {EXACT_LEN}‑character User ID</li>
                 <li>Exactly {EXACT_LEN}‑character Referrer’s ID</li>
                 <li>A secret Fund Code (min 4 chars) for withdrawals</li>
-                <li>{config.registrationFee} USDT balance in your wallet</li>
+                <li>{fee} USDT balance in your wallet</li>
               </ul>
             </div>
             <p style={{ ...styles.smallNote, marginTop: 8 }}>
-              Note: IDs longer than {EXACT_LEN} are not supported by the current smart contract. If
-              you need 6–8 later, we must deploy a new contract.
+              Note: IDs longer than {EXACT_LEN} are not supported by the current smart contract. If you need 6–8 later, we must deploy a new contract.
             </p>
           </section>
         </div>
