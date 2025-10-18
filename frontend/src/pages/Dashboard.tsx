@@ -14,7 +14,7 @@ import {
   getLevel1ReferralIdsFromChain,
 } from '../utils/contract'
 import { showSuccessToast, showErrorToast } from '../utils/notification'
-import { markLogin } from '../services/api'
+import { markLogin, getStats, type StatsResponse } from '../services/api'
 import { isValidAddress } from '../utils/wallet'
 
 type OnChainData = {
@@ -178,6 +178,30 @@ const Dashboard: React.FC = () => {
     },
   })
 
+  // Off-chain stats (lite) for coin balance + login days
+  const {
+    data: stats,
+    isLoading: isStatsLoading,
+    refetch: refetchStatsLite,
+  } = useQuery<StatsResponse | null>({
+    queryKey: ['stats-lite', account],
+    enabled: isValidAddress(account),
+    retry: false,
+    refetchOnWindowFocus: false,
+    refetchInterval: 60000,
+    queryFn: async () => {
+      if (!isValidAddress(account)) return null
+      try {
+        const res = await getStats(account!)
+        return res.data
+      } catch (err: any) {
+        const status = err?.response?.status || err?.status
+        if (status === 404) return null
+        throw err
+      }
+    },
+  })
+
   const referralCode = useMemo(() => (userId || '').toUpperCase(), [userId])
   const referralLink = useMemo(
     () => `${window.location.origin}/register?ref=${referralCode}`,
@@ -196,8 +220,7 @@ const Dashboard: React.FC = () => {
     showSuccessToast('Copied to clipboard')
   }
 
-  // Off-chain coin balance placeholder (getStats removed as per requirement)
-  const coinBalance = 0
+  const coinBalance = stats?.coin_balance ?? 0
 
   // ---------------- Handlers ----------------
   const handleUserPayout = async () => {
@@ -226,6 +249,8 @@ const Dashboard: React.FC = () => {
       const { timestamp, signature } = await signAuthMessage(account!)
       await markLogin(account!, timestamp, signature)
       showSuccessToast('Login counted for today')
+      // Refresh coin balance and login days right after marking login
+      await refetchStatsLite()
     } catch (e) {
       showErrorToast(e, 'Unable to mark login')
     } finally {
@@ -313,7 +338,9 @@ const Dashboard: React.FC = () => {
     <div style={styles.grid}>
       <div style={styles.card}>
         <h3 style={styles.cardTitle}>Total Coin Balance</h3>
-        <div style={styles.balance}>{coinBalance}</div>
+        <div style={styles.balance}>
+          {isStatsLoading ? '...' : coinBalance}
+        </div>
         <button style={styles.buttonGhost} disabled>
           Withdraw (Coming Soon)
         </button>
@@ -356,6 +383,12 @@ const Dashboard: React.FC = () => {
             <div style={styles.statLabel}>Total Refer (L1)</div>
             <div style={styles.statValue}>
               {isRefsLoading ? '...' : referralList.length}
+            </div>
+          </div>
+          <div style={styles.statBox}>
+            <div style={styles.statLabel}>Total Login (days)</div>
+            <div style={styles.statValue}>
+              {isStatsLoading ? '...' : (stats?.logins?.total_login_days ?? 0)}
             </div>
           </div>
         </div>
