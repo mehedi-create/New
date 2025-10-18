@@ -32,47 +32,24 @@ const colors = {
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  page: {
-    minHeight: '100vh',
-    width: '100%',
-  },
-  container: {
-    maxWidth: 680,
-    margin: '0 auto',
-    padding: '16px 12px 96px', // space for bottom nav
-  },
+  page: { minHeight: '100vh', width: '100%' },
+  container: { maxWidth: 680, margin: '0 auto', padding: '16px 12px 96px' },
   topBar: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-    marginBottom: 12,
-    flexWrap: 'wrap',
-    color: colors.text,
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    gap: 8, marginBottom: 12, flexWrap: 'wrap', color: colors.text,
   },
   brand: { fontWeight: 900, fontSize: 18, letterSpacing: 1 },
 
-  // User menu
   userMenuWrap: { position: 'relative', display: 'flex', alignItems: 'center', gap: 8 },
-  userIdText: {
-    fontWeight: 800,
-    fontSize: 13,
-    maxWidth: 160,
-    whiteSpace: 'nowrap',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-  },
+  userIdText: { fontWeight: 800, fontSize: 13, maxWidth: 160, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
   userMenuBtn: {
     width: 34, height: 34, borderRadius: '50%',
-    border: `1px solid ${colors.grayLine}`,
-    background: 'rgba(255,255,255,0.06)',
+    border: `1px solid ${colors.grayLine}`, background: 'rgba(255,255,255,0.06)',
     cursor: 'pointer', display: 'grid', placeItems: 'center', color: colors.text,
   },
   dropdown: {
-    position: 'absolute', right: 0, top: 40,
-    background: 'rgba(15,31,63,0.98)',
-    border: `1px solid ${colors.grayLine}`,
-    borderRadius: 10, boxShadow: '0 10px 24px rgba(0,0,0,0.35)',
+    position: 'absolute', right: 0, top: 40, background: 'rgba(15,31,63,0.98)',
+    border: `1px solid ${colors.grayLine}`, borderRadius: 10, boxShadow: '0 10px 24px rgba(0,0,0,0.35)',
     padding: 6, minWidth: 140, zIndex: 100, backdropFilter: 'blur(8px)', color: colors.text,
   },
   dropdownItem: {
@@ -80,7 +57,6 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 8, border: 'none', background: 'transparent', cursor: 'pointer', fontWeight: 800, color: colors.text,
   },
 
-  // Grid and cards
   grid: { display: 'grid', gridTemplateColumns: '1fr', gap: 12, alignItems: 'stretch' },
   cardShell: { background: 'transparent', border: 'none', padding: 0 },
   cardTitle: { margin: '0 0 6px 0', fontSize: 16, fontWeight: 900 },
@@ -92,8 +68,8 @@ const styles: Record<string, React.CSSProperties> = {
   copyWrap: { display: 'grid', gridTemplateColumns: '1fr', gap: 8, alignItems: 'center' },
   small: { fontSize: 12, color: colors.textMuted },
   balance: { fontSize: 26, fontWeight: 900, margin: '4px 0 6px' },
+  divider: { height: 1, background: colors.grayLine, margin: '6px 0' },
 
-  // Buttons
   button: {
     height: 44, borderRadius: 10,
     background: `linear-gradient(45deg, ${colors.accent}, ${colors.accentSoft})`,
@@ -105,39 +81,29 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 14, fontWeight: 800, cursor: 'pointer', padding: '0 12px', width: '100%',
   },
 
-  // Bottom nav
   bottomNavWrap: { position: 'fixed', bottom: 12, left: '50%', transform: 'translateX(-50%)', width: '100%', maxWidth: 680, padding: '0 12px', zIndex: 200 },
   bottomNav: { display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 },
   navBtn: {
     height: 48, borderRadius: 12, border: `1px solid ${colors.grayLine}`,
     background: 'rgba(255,255,255,0.06)', fontWeight: 800, cursor: 'pointer', color: colors.text, display: 'grid', placeItems: 'center',
   },
-  navBtnActive: {
-    background: `linear-gradient(45deg, ${colors.accent}, ${colors.accentSoft})`, color: '#0b1b3b', borderColor: colors.accent,
-  },
+  navBtnActive: { background: `linear-gradient(45deg, ${colors.accent}, ${colors.accentSoft})`, color: '#0b1b3b', borderColor: colors.accent },
 }
 
 const IconHome: React.FC<{ size?: number }> = ({ size = 20 }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" role="img" aria-hidden="true" focusable="false">
-    <path d="M3 10.5L12 3l9 7.5v8.5a2 2 0 0 1-2 2h-5v-6H10v6H5a2 2 0 0 1-2-2v-8.5z" fill="currentColor"/>
-  </svg>
+  <svg width={size} height={size} viewBox="0 0 24 24"><path d="M3 10.5L12 3l9 7.5v8.5a2 2 0 0 1-2 2h-5v-6H10v6H5a2 2 0 0 1-2-2v-8.5z" fill="currentColor"/></svg>
 )
-
 const IconSurpriseCoin: React.FC<{ size?: number }> = ({ size = 20 }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" role="img" aria-hidden="true" focusable="false">
+  <svg width={size} height={size} viewBox="0 0 24 24">
     <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="2"/>
     <circle cx="12" cy="12" r="4.5" fill="none" stroke="currentColor" strokeWidth="2"/>
     <path d="M17.4 4.8l.5 1.4 1.4.5-1.4.5-.5 1.4-.5-1.4-1.4-.5 1.4-.5.5-1.4z" fill="currentColor"/>
   </svg>
 )
-
 const IconUser: React.FC<{ size?: number }> = ({ size = 18 }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" role="img" aria-hidden="true" focusable="false">
-    <path d="M12 12a5 5 0 1 0-5-5 5.006 5.006 0 0 0 5 5zm0 2c-5 0-9 2.5-9 5.5V22h18v-2.5C21 16.5 17 14 12 14z" fill="currentColor"/>
-  </svg>
+  <svg width={size} height={size} viewBox="0 0 24 24"><path d="M12 12a5 5 0 1 0-5-5 5.006 5.006 0 0 0 5 5zm0 2c-5 0-9 2.5-9 5.5V22h18v-2.5C21 16.5 17 14 12 14z" fill="currentColor"/></svg>
 )
 
-// small surface wrapper (markup only, CSS is global)
 const Surface: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <div className="lxr-surface">
     <div className="lxr-surface-lines" />
@@ -148,7 +114,6 @@ const Surface: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   </div>
 )
 
-// Cookies for tab/amount persist
 const setCookie = (name: string, value: string, days = 365) => {
   const maxAge = days * 24 * 60 * 60
   const secure = window.location.protocol === 'https:' ? '; Secure' : ''
@@ -165,24 +130,19 @@ const Dashboard: React.FC = () => {
   const { account, userId, disconnect } = useWallet()
   const queryClient = useQueryClient()
 
-  // Active tab
   const [activeTab, setActiveTabState] = useState<'home' | 'surprise'>(() => (getCookie('activeTab') === 'surprise' ? 'surprise' : 'home'))
   const setActiveTab = (t: 'home' | 'surprise') => { setActiveTabState(t); setCookie('activeTab', t, 365) }
-
   const [isProcessing, setIsProcessing] = useState(false)
 
-  // User dropdown
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
     const onDocClick = (e: MouseEvent) => { if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false) }
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenuOpen(false) }
-    document.addEventListener('mousedown', onDocClick)
-    document.addEventListener('keydown', onKey)
+    document.addEventListener('mousedown', onDocClick); document.addEventListener('keydown', onKey)
     return () => { document.removeEventListener('mousedown', onDocClick); document.removeEventListener('keydown', onKey) }
   }, [])
 
-  // On-chain data
   const { data: onChainData, isLoading: isOnChainLoading } = useQuery<OnChainData | null>({
     queryKey: ['onChainData', account],
     enabled: isValidAddress(account),
@@ -191,15 +151,12 @@ const Dashboard: React.FC = () => {
     queryFn: async () => {
       if (!isValidAddress(account)) return null
       const [balance, hasCode, fee] = await Promise.all([
-        getUserBalance(account!),
-        hasSetFundCode(account!),
-        getRegistrationFee(),
+        getUserBalance(account!), hasSetFundCode(account!), getRegistrationFee(),
       ])
       return { userBalance: balance, hasFundCode: hasCode, registrationFee: fee }
     },
   })
 
-  // L1 referrals
   const { data: referralList = [], isLoading: isRefsLoading } = useQuery<string[]>({
     queryKey: ['referralsL1', account],
     enabled: isValidAddress(account),
@@ -210,7 +167,6 @@ const Dashboard: React.FC = () => {
     },
   })
 
-  // Mining stats query kept for invalidation (not displayed)
   useQuery<{ count: number; totalDeposited: string }>({
     queryKey: ['miningStats', account],
     enabled: isValidAddress(account),
@@ -221,22 +177,14 @@ const Dashboard: React.FC = () => {
     },
   })
 
-  // Off-chain stats for coin balance + login days
   const { data: stats, isLoading: isStatsLoading, refetch: refetchStatsLite } = useQuery<StatsResponse | null>({
     queryKey: ['stats-lite', account],
     enabled: isValidAddress(account),
-    retry: false,
-    refetchOnWindowFocus: false,
-    refetchInterval: 60000,
+    retry: false, refetchOnWindowFocus: false, refetchInterval: 60000,
     queryFn: async () => {
       if (!isValidAddress(account)) return null
-      try {
-        const res = await getStats(account!)
-        return res.data
-      } catch (err: any) {
-        const status = err?.response?.status || err?.status
-        if (status === 404) return null
-        throw err
+      try { const res = await getStats(account!); return res.data } catch (err: any) {
+        const status = err?.response?.status || err?.status; if (status === 404) return null; throw err
       }
     },
   })
@@ -245,21 +193,16 @@ const Dashboard: React.FC = () => {
   const displayUserId = useMemo(() => (userId || stats?.userId || 'USER').toUpperCase(), [userId, stats?.userId])
   const referralLink = useMemo(() => `${window.location.origin}/register?ref=${referralCode}`, [referralCode])
 
-  const safeMoney = (val?: string) => {
-    const n = parseFloat(val || '0'); return isNaN(n) ? '0.00' : n.toFixed(2)
-  }
+  const safeMoney = (val?: string) => { const n = parseFloat(val || '0'); return isNaN(n) ? '0.00' : n.toFixed(2) }
   const copyToClipboard = (text: string) => { navigator.clipboard.writeText(text); showSuccessToast('Copied to clipboard') }
   const coinBalance = stats?.coin_balance ?? 0
 
-  // Handlers
   const handleUserPayout = async () => {
     if (!onChainData?.hasFundCode) { showErrorToast('Fund code not set. Please register with a fund code.'); return }
     const code = window.prompt('Enter your secret Fund Code'); if (!code) return
     setIsProcessing(true)
-    try {
-      const tx = await withdrawWithFundCode(code); if ((tx as any)?.wait) await (tx as any).wait()
-      showSuccessToast('Payout successful!')
-    } catch (e) { showErrorToast(e, 'Payout failed') } finally { setIsProcessing(false) }
+    try { const tx = await withdrawWithFundCode(code); if ((tx as any)?.wait) await (tx as any).wait(); showSuccessToast('Payout successful!') }
+    catch (e) { showErrorToast(e, 'Payout failed') } finally { setIsProcessing(false) }
   }
 
   const handleMarkTodayLogin = async () => {
@@ -273,10 +216,8 @@ const Dashboard: React.FC = () => {
     } catch (e) { showErrorToast(e, 'Unable to mark login') } finally { setIsProcessing(false) }
   }
 
-  // Persisted mining amount
   const [miningAmount, setMiningAmount] = useState<string>(() => getCookie('miningAmount') || '5.00')
   useEffect(() => { setCookie('miningAmount', miningAmount || '', 30) }, [miningAmount])
-
   const amountNum = Number(miningAmount || '0')
   const isInvalidAmount = miningAmount !== '' && (isNaN(amountNum) || amountNum < 5)
 
@@ -292,7 +233,6 @@ const Dashboard: React.FC = () => {
     } catch (e) { showErrorToast(e, 'Failed to buy miner') } finally { setIsProcessing(false) }
   }
 
-  // Views
   const renderHome = () => (
     <div style={styles.grid}>
       <div style={styles.cardShell}>
@@ -304,10 +244,19 @@ const Dashboard: React.FC = () => {
             <div style={styles.balance}>${safeMoney(onChainData?.userBalance)}</div>
           )}
           <div style={styles.row}>
-            <button style={styles.button} disabled={isProcessing || isOnChainLoading} onClick={handleUserPayout}>
-              Payout
-            </button>
+            <button style={styles.button} disabled={isProcessing || isOnChainLoading} onClick={handleUserPayout}>Payout</button>
           </div>
+
+          <div style={styles.divider} />
+
+          <div style={{ ...styles.small, marginTop: 6 }}>
+            Total Coin Balance: <strong>{isStatsLoading ? '...' : coinBalance}</strong>
+          </div>
+          <div style={{ ...styles.small, marginTop: 4 }}>
+            Daily Login adds 1 coin. Referral adds 5 coins (off‑chain).
+          </div>
+          <button style={{ ...styles.buttonGhost, marginTop: 8 }} disabled>Payout (Coming Soon)</button>
+
           {!isOnChainLoading && !onChainData?.hasFundCode && (
             <div style={{ ...styles.small, color: colors.danger, marginTop: 8 }}>
               Fund code not set. You must register with a fund code to withdraw.
@@ -348,34 +297,22 @@ const Dashboard: React.FC = () => {
         </Surface>
       </div>
 
-      {/* Mining area: only the card (no extra heading/below text) */}
+      {/* Mining area: only card (no extra heading/below text) */}
       <div style={styles.cardShell}>
         <div className="lxr-mining-card">
           <div className="lxr-network-lines" />
           <div className="lxr-crypto-mesh" />
           <div className="lxr-circuit" />
           <div className="lxr-holo" />
-
           <div style={{ position: 'relative', zIndex: 2 }}>
-            {/* Header */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
               <div>
-                <div className="lxr-lexori-logo" style={{ fontSize: 22, fontWeight: 900, letterSpacing: 1 }}>
-                  LEXORI
-                </div>
-                <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, color: colors.accent }}>
-                  MINING CARD
-                </div>
+                <div className="lxr-lexori-logo" style={{ fontSize: 22, fontWeight: 900, letterSpacing: 1 }}>LEXORI</div>
+                <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, color: colors.accent }}>MINING CARD</div>
               </div>
-              <div style={{
-                width: 42, height: 42, borderRadius: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                background: 'linear-gradient(45deg, #14b8a6, #e8f9f1)', color: '#000', fontWeight: 800
-              }}>
-                L
-              </div>
+              <div style={{ width: 42, height: 42, borderRadius: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(45deg, #14b8a6, #e8f9f1)', color: '#000', fontWeight: 800 }}>L</div>
             </div>
 
-            {/* Purchase */}
             <div className="lxr-panel">
               <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
                 <div style={{ flex: 1 }}>
@@ -385,12 +322,8 @@ const Dashboard: React.FC = () => {
                   <input
                     id="lxr-qty"
                     className={`lxr-quantity ${isInvalidAmount ? 'lxr-invalid' : ''}`}
-                    type="number"
-                    min={5}
-                    step="0.01"
-                    placeholder="5.00"
-                    value={miningAmount}
-                    onChange={(e) => setMiningAmount(e.target.value)}
+                    type="number" min={5} step="0.01" placeholder="5.00"
+                    value={miningAmount} onChange={(e) => setMiningAmount(e.target.value)}
                   />
                 </div>
                 <button className="lxr-buy-btn" onClick={handleBuyMiner} disabled={isProcessing}>
@@ -420,7 +353,6 @@ const Dashboard: React.FC = () => {
               Mark Today’s Login
             </button>
           </div>
-          {/* Registration fee / commission text removed as requested */}
         </Surface>
       </div>
     </div>
@@ -431,8 +363,6 @@ const Dashboard: React.FC = () => {
       <div style={styles.container}>
         <div style={styles.topBar}>
           <div className="lxr-lexori-logo" style={styles.brand as any}>Web3 Community</div>
-
-          {/* User menu */}
           <div style={styles.userMenuWrap} ref={menuRef}>
             <span style={styles.userIdText} title={displayUserId}>{displayUserId}</span>
             <button style={styles.userMenuBtn} onClick={() => setMenuOpen(v => !v)} aria-haspopup="menu" aria-expanded={menuOpen} aria-label="User menu">
@@ -450,7 +380,6 @@ const Dashboard: React.FC = () => {
 
         {activeTab === 'home' ? renderHome() : renderSurprise()}
 
-        {/* Bottom nav */}
         <div style={styles.bottomNavWrap}>
           <div className="lxr-surface" style={{ padding: 8, borderRadius: 14 }}>
             <div className="lxr-surface-lines" />
@@ -469,7 +398,6 @@ const Dashboard: React.FC = () => {
             </div>
           </div>
         </div>
-        {/* End bottom nav */}
       </div>
     </div>
   )
