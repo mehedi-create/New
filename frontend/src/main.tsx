@@ -1,4 +1,3 @@
-// frontend/src/main.tsx
 import React, { useEffect } from 'react'
 import ReactDOM from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -7,19 +6,11 @@ import AppRouter from './Router'
 
 const queryClient = new QueryClient({
   defaultOptions: {
-    queries: {
-      retry: 1,
-      refetchOnWindowFocus: false,
-      staleTime: 20_000,
-      gcTime: 5 * 60_000,
-    },
-    mutations: {
-      retry: 0,
-    },
+    queries: { retry: 1, refetchOnWindowFocus: false, staleTime: 20_000, gcTime: 5 * 60_000 },
+    mutations: { retry: 0 },
   },
 })
 
-// Cookie helpers
 function setCookie(name: string, value: string, days = 365) {
   const maxAge = days * 24 * 60 * 60
   const secure = window.location.protocol === 'https:' ? '; Secure' : ''
@@ -32,14 +23,19 @@ function getCookie(name: string): string | null {
   return null
 }
 
-// Global Lexori theme CSS (no animations)
 const THEME_CSS = `
 :root{
   --deep:#0b1b3b; --soft:#163057; --accent:#14b8a6; --accentSoft:#e0f5ed;
   --text:#e8f9f1; --muted:rgba(232,249,241,.75); --line:rgba(255,255,255,.12);
 }
-.theme-lexori body{
+
+/* Layout base fix to avoid white gaps on scroll */
+html, body, #root { height: 100%; min-height: 100%; margin: 0; }
+body { overscroll-behavior-y: contain; background-color: var(--deep); }
+
+.theme-lexori, .theme-lexori body, .theme-lexori #root {
   background: linear-gradient(135deg, var(--deep) 0%, var(--soft) 30%, var(--deep) 70%, var(--soft) 100%);
+  background-attachment: fixed;
   color: var(--text);
 }
 
@@ -50,7 +46,7 @@ const THEME_CSS = `
   text-shadow: 0 0 30px rgba(20,184,166,0.5);
 }
 
-/* Reusable surface (same look for all cards) */
+/* Reusable surface */
 .lxr-surface{
   position:relative; overflow:hidden; border-radius:16px; padding:14px; width:100%; color:var(--text);
   background:
@@ -87,7 +83,7 @@ const THEME_CSS = `
   background: linear-gradient(90deg, transparent 0%, rgba(20,184,166,0.35) 25%, rgba(232,249,241,0.35) 50%, rgba(224,245,237,0.35) 75%, transparent 100%);
 }
 
-/* Mining card visuals (no animations) */
+/* Mining card */
 .lxr-mining-card{
   position:relative; overflow:hidden; border-radius:16px; padding:16px; width:100%; max-width:380px; aspect-ratio:1.586;
   background:
@@ -99,7 +95,8 @@ const THEME_CSS = `
   border: 1px solid rgba(20,184,166,0.2);
 }
 .lxr-network-lines, .lxr-crypto-mesh, .lxr-circuit { position:absolute; inset:0; pointer-events:none; }
-.lxr-network-lines{ opacity:.15; background-image:
+.lxr-network-lines{
+  opacity:.15; background-image:
   radial-gradient(circle at 20% 30%, var(--accent) 2px, transparent 2px),
   radial-gradient(circle at 80% 70%, #e8f9f1 2px, transparent 2px),
   radial-gradient(circle at 60% 20%, var(--soft) 2px, transparent 2px),
@@ -107,18 +104,15 @@ const THEME_CSS = `
   radial-gradient(circle at 90% 30%, var(--accentSoft) 1px, transparent 1px);
   background-size: 60px 60px, 80px 80px, 70px 70px, 40px 40px, 50px 50px;
 }
-.lxr-crypto-mesh{ opacity:.08; background-image:
+.lxr-crypto-mesh{
+  opacity:.08; background-image:
   linear-gradient(30deg, transparent 40%, rgba(20,184,166,0.3) 41%, rgba(20,184,166,0.3) 42%, transparent 43%),
   linear-gradient(150deg, transparent 40%, rgba(232,249,241,0.3) 41%, rgba(232,249,241,0.3) 42%, transparent 43%),
   linear-gradient(90deg, transparent 40%, rgba(22,48,87,0.3) 41%, rgba(22,48,87,0.3) 42%, transparent 43%);
   background-size: 120px 120px, 100px 100px, 80px 80px;
 }
 .lxr-circuit{ opacity:.2; background-image: linear-gradient(90deg, rgba(20,184,166,0.1) 1px, transparent 1px), linear-gradient(rgba(20,184,166,0.1) 1px, transparent 1px); background-size: 20px 20px; }
-.lxr-holo{ position:absolute; top:0; left:0; height:4px; width:100%;
-  background: linear-gradient(90deg, transparent 0%, rgba(20,184,166,0.35) 25%, rgba(232,249,241,0.35) 50%, rgba(224,245,237,0.35) 75%, transparent 100%);
-}
 
-/* Mining card form controls */
 .lxr-panel { background:rgba(0,0,0,0.3); backdrop-filter:blur(10px); border:1px solid rgba(255,255,255,0.1); border-radius:12px; padding:12px; }
 .lxr-quantity{ width:100%; padding:10px 12px; border-radius:10px; background:rgba(255,255,255,0.05); border:2px solid rgba(20,184,166,0.3); color:#fff; font-weight:700; font-size:15px; transition:all .2s ease; }
 .lxr-quantity:focus{ background:rgba(255,255,255,0.1); border-color:var(--accent); outline:none; box-shadow:0 0 12px rgba(20,184,166,0.25); }
@@ -141,7 +135,6 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
       <WalletProvider>
-        {/* Global theme applies to all routes/pages */}
         <GlobalLexoriTheme />
         <AppRouter />
       </WalletProvider>
