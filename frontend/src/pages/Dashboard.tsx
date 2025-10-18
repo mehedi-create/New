@@ -1,4 +1,3 @@
-// frontend/src/pages/Dashboard.tsx
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useWallet } from '../context/WalletContext'
@@ -23,44 +22,24 @@ type OnChainData = {
   registrationFee: string
 }
 
-// Cookie helpers
-const setCookie = (name: string, value: string, days = 365) => {
-  const maxAge = days * 24 * 60 * 60
-  const secure = window.location.protocol === 'https:' ? '; Secure' : ''
-  document.cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)}; Path=/; Max-Age=${maxAge}; SameSite=Lax${secure}`
-}
-const getCookie = (name: string): string | null => {
-  const key = `${encodeURIComponent(name)}=`
-  const parts = document.cookie.split('; ')
-  for (const p of parts) {
-    if (p.startsWith(key)) return decodeURIComponent(p.substring(key.length))
-  }
-  return null
-}
-
 const colors = {
-  deepNavy: '#0b1b3b',
-  navySoft: '#163057',
-  accent: '#14b8a6',
-  accentSoft: '#e0f5ed',
   text: '#e8f9f1',
   textMuted: 'rgba(232,249,241,0.75)',
   danger: '#ef4444',
   grayLine: 'rgba(255,255,255,0.12)',
+  accent: '#14b8a6',
+  accentSoft: '#e0f5ed',
 }
 
-const styles: Record<string, React.CSSProperties & Record<string, any>> = {
+const styles: Record<string, React.CSSProperties> = {
   page: {
     minHeight: '100vh',
     width: '100%',
-    background: `linear-gradient(135deg, ${colors.deepNavy} 0%, ${colors.navySoft} 30%, ${colors.deepNavy} 70%, ${colors.navySoft} 100%)`,
-    color: colors.text,
-    userSelect: 'none',
   },
   container: {
     maxWidth: 680,
     margin: '0 auto',
-    padding: '16px 12px 96px', // bottom space for fixed nav
+    padding: '16px 12px 96px', // space for bottom nav
   },
   topBar: {
     display: 'flex',
@@ -69,20 +48,12 @@ const styles: Record<string, React.CSSProperties & Record<string, any>> = {
     gap: 8,
     marginBottom: 12,
     flexWrap: 'wrap',
+    color: colors.text,
   },
-  brand: {
-    fontWeight: 900,
-    fontSize: 18,
-    letterSpacing: 1,
-  },
+  brand: { fontWeight: 900, fontSize: 18, letterSpacing: 1 },
 
-  // User menu (id + icon + dropdown)
-  userMenuWrap: {
-    position: 'relative',
-    display: 'flex',
-    alignItems: 'center',
-    gap: 8,
-  },
+  // User menu
+  userMenuWrap: { position: 'relative', display: 'flex', alignItems: 'center', gap: 8 },
   userIdText: {
     fontWeight: 800,
     fontSize: 13,
@@ -90,147 +61,62 @@ const styles: Record<string, React.CSSProperties & Record<string, any>> = {
     whiteSpace: 'nowrap',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
-    color: colors.text,
   },
   userMenuBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: '50%',
+    width: 34, height: 34, borderRadius: '50%',
     border: `1px solid ${colors.grayLine}`,
     background: 'rgba(255,255,255,0.06)',
-    cursor: 'pointer',
-    display: 'grid',
-    placeItems: 'center',
-    color: colors.text,
+    cursor: 'pointer', display: 'grid', placeItems: 'center', color: colors.text,
   },
   dropdown: {
-    position: 'absolute',
-    right: 0,
-    top: 40,
+    position: 'absolute', right: 0, top: 40,
     background: 'rgba(15,31,63,0.98)',
     border: `1px solid ${colors.grayLine}`,
-    borderRadius: 10,
-    boxShadow: '0 10px 24px rgba(0,0,0,0.35)',
-    padding: 6,
-    minWidth: 140,
-    zIndex: 100,
-    backdropFilter: 'blur(8px)',
+    borderRadius: 10, boxShadow: '0 10px 24px rgba(0,0,0,0.35)',
+    padding: 6, minWidth: 140, zIndex: 100, backdropFilter: 'blur(8px)', color: colors.text,
   },
   dropdownItem: {
-    width: '100%',
-    textAlign: 'left' as const,
-    padding: '8px 10px',
-    borderRadius: 8,
-    border: 'none',
-    background: 'transparent',
-    cursor: 'pointer',
-    fontWeight: 800,
-    color: colors.text,
+    width: '100%', textAlign: 'left' as const, padding: '8px 10px',
+    borderRadius: 8, border: 'none', background: 'transparent', cursor: 'pointer', fontWeight: 800, color: colors.text,
   },
 
-  // Grid
+  // Grid and cards
   grid: { display: 'grid', gridTemplateColumns: '1fr', gap: 12, alignItems: 'stretch' },
-
-  cardShell: {
-    // wrapper becomes transparent; surface inside will style
-    background: 'transparent',
-    border: 'none',
-    padding: 0,
-  },
+  cardShell: { background: 'transparent', border: 'none', padding: 0 },
   cardTitle: { margin: '0 0 6px 0', fontSize: 16, fontWeight: 900 },
-  statRow: { display: 'grid', gridTemplateColumns: '1fr', gap: 8 },
-  statBox: {
-    background: 'rgba(0,0,0,0.30)',
-    border: `1px solid ${colors.grayLine}`,
-    borderRadius: 12,
-    padding: 10,
-    textAlign: 'center',
+  row: { display: 'grid', gridTemplateColumns: '1fr', gap: 8, width: '100%' },
+  input: {
+    height: 40, borderRadius: 10, border: '2px solid rgba(20,184,166,0.3)',
+    padding: '0 10px', background: 'rgba(255,255,255,0.05)', outline: 'none', color: colors.text, fontSize: 14, width: '100%',
   },
-  statLabel: { fontSize: 12, color: colors.textMuted },
-  statValue: { fontSize: 22, fontWeight: 900, color: colors.text },
-  balance: { fontSize: 26, fontWeight: 900, margin: '4px 0 6px', color: colors.text },
+  copyWrap: { display: 'grid', gridTemplateColumns: '1fr', gap: 8, alignItems: 'center' },
+  small: { fontSize: 12, color: colors.textMuted },
+  balance: { fontSize: 26, fontWeight: 900, margin: '4px 0 6px' },
 
-  // Buttons (Primary / Ghost)
+  // Buttons
   button: {
-    height: 44,
-    borderRadius: 10,
+    height: 44, borderRadius: 10,
     background: `linear-gradient(45deg, ${colors.accent}, ${colors.accentSoft})`,
-    color: '#0b1b3b',
-    border: 'none',
-    fontSize: 14,
-    fontWeight: 800,
-    cursor: 'pointer',
-    padding: '0 12px',
-    width: '100%',
+    color: '#0b1b3b', border: 'none', fontSize: 14, fontWeight: 800, cursor: 'pointer', padding: '0 12px', width: '100%',
     boxShadow: '0 4px 15px rgba(20,184,166,0.3)',
   },
   buttonGhost: {
-    height: 44,
-    borderRadius: 10,
-    background: 'rgba(255,255,255,0.06)',
-    color: colors.text,
-    border: `1px solid ${colors.grayLine}`,
-    fontSize: 14,
-    fontWeight: 800,
-    cursor: 'pointer',
-    padding: '0 12px',
-    width: '100%',
+    height: 44, borderRadius: 10, background: 'rgba(255,255,255,0.06)', color: colors.text, border: `1px solid ${colors.grayLine}`,
+    fontSize: 14, fontWeight: 800, cursor: 'pointer', padding: '0 12px', width: '100%',
   },
 
-  row: { display: 'grid', gridTemplateColumns: '1fr', gap: 8, width: '100%' },
-
-  // Inputs (dark)
-  input: {
-    height: 40,
-    borderRadius: 10,
-    border: '2px solid rgba(20,184,166,0.3)',
-    padding: '0 10px',
-    background: 'rgba(255,255,255,0.05)',
-    outline: 'none',
-    color: colors.text,
-    fontSize: 14,
-    width: '100%',
-  },
-
-  copyWrap: { display: 'grid', gridTemplateColumns: '1fr', gap: 8, alignItems: 'center' },
-  small: { fontSize: 12, color: colors.textMuted },
-  divider: { height: 1, background: colors.grayLine, margin: '6px 0' },
-
-  // Bottom fixed nav
-  bottomNavWrap: {
-    position: 'fixed',
-    bottom: 12,
-    left: '50%',
-    transform: 'translateX(-50%)',
-    width: '100%',
-    maxWidth: 680,
-    padding: '0 12px',
-    zIndex: 200,
-  },
-  bottomNav: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(2, 1fr)',
-    gap: 8,
-  },
+  // Bottom nav
+  bottomNavWrap: { position: 'fixed', bottom: 12, left: '50%', transform: 'translateX(-50%)', width: '100%', maxWidth: 680, padding: '0 12px', zIndex: 200 },
+  bottomNav: { display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 },
   navBtn: {
-    height: 48,
-    borderRadius: 12,
-    border: `1px solid ${colors.grayLine}`,
-    background: 'rgba(255,255,255,0.06)',
-    fontWeight: 800,
-    cursor: 'pointer',
-    color: colors.text,
-    display: 'grid',
-    placeItems: 'center',
+    height: 48, borderRadius: 12, border: `1px solid ${colors.grayLine}`,
+    background: 'rgba(255,255,255,0.06)', fontWeight: 800, cursor: 'pointer', color: colors.text, display: 'grid', placeItems: 'center',
   },
   navBtnActive: {
-    background: `linear-gradient(45deg, ${colors.accent}, ${colors.accentSoft})`,
-    color: '#0b1b3b',
-    borderColor: colors.accent,
+    background: `linear-gradient(45deg, ${colors.accent}, ${colors.accentSoft})`, color: '#0b1b3b', borderColor: colors.accent,
   },
 }
 
-/* High-quality inline SVG icons */
 const IconHome: React.FC<{ size?: number }> = ({ size = 20 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" role="img" aria-hidden="true" focusable="false">
     <path d="M3 10.5L12 3l9 7.5v8.5a2 2 0 0 1-2 2h-5v-6H10v6H5a2 2 0 0 1-2-2v-8.5z" fill="currentColor"/>
@@ -251,140 +137,49 @@ const IconUser: React.FC<{ size?: number }> = ({ size = 18 }) => (
   </svg>
 )
 
-// Shared Lexori surface CSS (no animations)
-const sharedLexoriCSS = `
-.lxr-surface {
-  color: #fff; position: relative; overflow: hidden;
-  border-radius: 16px; padding: 14px; width: 100%;
-  background:
-    radial-gradient(circle at 20% 20%, rgba(20,184,166,0.15) 0%, transparent 50%),
-    radial-gradient(circle at 80% 80%, rgba(232,249,241,0.1) 0%, transparent 50%),
-    radial-gradient(circle at 40% 60%, rgba(22,48,87,0.2) 0%, transparent 50%),
-    linear-gradient(135deg, #0b1b3b 0%, #163057 30%, #0b1b3b 70%, #163057 100%);
-  box-shadow: 0 15px 30px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.1), inset 0 0 50px rgba(20,184,166,0.05);
-  border: 1px solid rgba(20,184,166,0.2);
-}
-.lxr-surface-lines, .lxr-surface-mesh, .lxr-surface-circuit { position:absolute; inset:0; pointer-events:none; }
-.lxr-surface-lines {
-  opacity:.15; background-image:
-  radial-gradient(circle at 20% 30%, #14b8a6 2px, transparent 2px),
-  radial-gradient(circle at 80% 70%, #e8f9f1 2px, transparent 2px),
-  radial-gradient(circle at 60% 20%, #163057 2px, transparent 2px),
-  radial-gradient(circle at 40% 80%, #14b8a6 1px, transparent 1px),
-  radial-gradient(circle at 90% 30%, #e0f5ed 1px, transparent 1px);
-  background-size: 60px 60px, 80px 80px, 70px 70px, 40px 40px, 50px 50px;
-}
-.lxr-surface-mesh {
-  opacity:.08; background-image:
-  linear-gradient(30deg, transparent 40%, rgba(20,184,166,0.3) 41%, rgba(20,184,166,0.3) 42%, transparent 43%),
-  linear-gradient(150deg, transparent 40%, rgba(232,249,241,0.3) 41%, rgba(232,249,241,0.3) 42%, transparent 43%),
-  linear-gradient(90deg, transparent 40%, rgba(22,48,87,0.3) 41%, rgba(22,48,87,0.3) 42%, transparent 43%);
-  background-size: 120px 120px, 100px 100px, 80px 80px;
-}
-.lxr-surface-circuit {
-  opacity:.2; background-image: linear-gradient(90deg, rgba(20,184,166,0.1) 1px, transparent 1px), linear-gradient(rgba(20,184,166,0.1) 1px, transparent 1px);
-  background-size: 20px 20px;
-}
-.lxr-surface-holo { position:absolute; top:0; left:0; height:4px; width:100%;
-  background: linear-gradient(90deg, transparent 0%, rgba(20,184,166,0.35) 25%, rgba(232,249,241,0.35) 50%, rgba(224,245,237,0.35) 75%, transparent 100%);
-}
+// small surface wrapper (markup only, CSS is global)
+const Surface: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <div className="lxr-surface">
+    <div className="lxr-surface-lines" />
+    <div className="lxr-surface-mesh" />
+    <div className="lxr-surface-circuit" />
+    <div className="lxr-surface-holo" />
+    <div style={{ position: 'relative', zIndex: 2 }}>{children}</div>
+  </div>
+)
 
-/* Mining Card (no animations, credit-card aspect) */
-.lxr-mining-card {
-  color: #fff; position: relative; overflow: hidden;
-  border-radius: 16px; padding: 16px; width: 100%; max-width: 380px;
-  aspect-ratio: 1.586; margin: 0 auto;
-  background:
-    radial-gradient(circle at 20% 20%, rgba(20,184,166,0.15) 0%, transparent 50%),
-    radial-gradient(circle at 80% 80%, rgba(232,249,241,0.1) 0%, transparent 50%),
-    radial-gradient(circle at 40% 60%, rgba(22,48,87,0.2) 0%, transparent 50%),
-    linear-gradient(135deg, #0b1b3b 0%, #163057 30%, #0b1b3b 70%, #163057 100%);
-  box-shadow: 0 15px 30px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.1), inset 0 0 50px rgba(20,184,166,0.05);
-  border: 1px solid rgba(20,184,166,0.2);
+// Cookies for tab/amount persist
+const setCookie = (name: string, value: string, days = 365) => {
+  const maxAge = days * 24 * 60 * 60
+  const secure = window.location.protocol === 'https:' ? '; Secure' : ''
+  document.cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)}; Path=/; Max-Age=${maxAge}; SameSite=Lax${secure}`
 }
-.lxr-network-lines, .lxr-crypto-mesh, .lxr-circuit { position:absolute; inset:0; pointer-events:none; }
-.lxr-network-lines { opacity:.15; background-image:
-  radial-gradient(circle at 20% 30%, #14b8a6 2px, transparent 2px),
-  radial-gradient(circle at 80% 70%, #e8f9f1 2px, transparent 2px),
-  radial-gradient(circle at 60% 20%, #163057 2px, transparent 2px),
-  radial-gradient(circle at 40% 80%, #14b8a6 1px, transparent 1px),
-  radial-gradient(circle at 90% 30%, #e0f5ed 1px, transparent 1px);
-  background-size: 60px 60px, 80px 80px, 70px 70px, 40px 40px, 50px 50px;
+const getCookie = (name: string): string | null => {
+  const key = `${encodeURIComponent(name)}=`
+  const parts = document.cookie.split('; ')
+  for (const p of parts) if (p.startsWith(key)) return decodeURIComponent(p.substring(key.length))
+  return null
 }
-.lxr-crypto-mesh { opacity:.08; background-image:
-  linear-gradient(30deg, transparent 40%, rgba(20,184,166,0.3) 41%, rgba(20,184,166,0.3) 42%, transparent 43%),
-  linear-gradient(150deg, transparent 40%, rgba(232,249,241,0.3) 41%, rgba(232,249,241,0.3) 42%, transparent 43%),
-  linear-gradient(90deg, transparent 40%, rgba(22,48,87,0.3) 41%, rgba(22,48,87,0.3) 42%, transparent 43%);
-  background-size: 120px 120px, 100px 100px, 80px 80px;
-}
-.lxr-circuit { opacity:.2; background-image: linear-gradient(90deg, rgba(20,184,166,0.1) 1px, transparent 1px), linear-gradient(rgba(20,184,166,0.1) 1px, transparent 1px); background-size: 20px 20px; }
-.lxr-holo { position:absolute; top:0; left:0; height:4px; width:100%;
-  background: linear-gradient(90deg, transparent 0%, rgba(20,184,166,0.35) 25%, rgba(232,249,241,0.35) 50%, rgba(224,245,237,0.35) 75%, transparent 100%);
-}
-
-/* Inputs and buttons for mining card */
-.lxr-panel { background:rgba(0,0,0,0.3); backdrop-filter:blur(10px); border:1px solid rgba(255,255,255,0.1); border-radius:12px; padding:12px; }
-.lxr-quantity{ width:100%; padding:10px 12px; border-radius:10px; background:rgba(255,255,255,0.05); border:2px solid rgba(20,184,166,0.3); color:#fff; font-weight:700; font-size:15px; transition:all .2s ease; }
-.lxr-quantity:focus{ background:rgba(255,255,255,0.1); border-color:#14b8a6; outline:none; box-shadow:0 0 12px rgba(20,184,166,0.25); }
-.lxr-quantity.lxr-invalid{ border-color:#ef4444; box-shadow:0 0 12px rgba(239,68,68,0.25); }
-.lxr-buy-btn{ min-width:130px; padding:10px 16px; border-radius:10px; border:none; font-weight:800; color:#0b1b3b; background:linear-gradient(45deg, #14b8a6, #e0f5ed); box-shadow:0 4px 15px rgba(20,184,166,0.3); cursor:pointer; transition:background .2s ease, opacity .2s ease; }
-.lxr-buy-btn:hover{ background:linear-gradient(45deg, #e0f5ed, #14b8a6); }
-.lxr-buy-btn:disabled{ opacity:.7; filter:grayscale(0.2); cursor:not-allowed; }
-`
 
 const Dashboard: React.FC = () => {
   const { account, userId, disconnect } = useWallet()
   const queryClient = useQueryClient()
 
-  // Active tab + cookies
-  const [activeTab, setActiveTabState] = useState<'home' | 'surprise'>(() => {
-    const c = getCookie('activeTab')
-    return c === 'surprise' ? 'surprise' : 'home'
-  })
-  const setActiveTab = (tab: 'home' | 'surprise') => {
-    setActiveTabState(tab)
-    setCookie('activeTab', tab, 365)
-  }
+  // Active tab
+  const [activeTab, setActiveTabState] = useState<'home' | 'surprise'>(() => (getCookie('activeTab') === 'surprise' ? 'surprise' : 'home'))
+  const setActiveTab = (t: 'home' | 'surprise') => { setActiveTabState(t); setCookie('activeTab', t, 365) }
 
   const [isProcessing, setIsProcessing] = useState(false)
+
+  // User dropdown
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement | null>(null)
-
-  // Apply theme cookie
   useEffect(() => {
-    setCookie('theme', 'lexori', 365)
-  }, [])
-
-  // Prevent copy/select/context menu
-  useEffect(() => {
-    const prevent = (e: Event) => e.preventDefault()
-    document.addEventListener('copy', prevent)
-    document.addEventListener('cut', prevent)
-    document.addEventListener('contextmenu', prevent)
-    document.addEventListener('selectstart', prevent)
-    return () => {
-      document.removeEventListener('copy', prevent)
-      document.removeEventListener('cut', prevent)
-      document.removeEventListener('contextmenu', prevent)
-      document.removeEventListener('selectstart', prevent)
-    }
-  }, [])
-
-  // Close user menu on outside click or ESC
-  useEffect(() => {
-    const onDocClick = (e: MouseEvent) => {
-      if (!menuRef.current) return
-      if (!menuRef.current.contains(e.target as Node)) setMenuOpen(false)
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setMenuOpen(false)
-    }
+    const onDocClick = (e: MouseEvent) => { if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false) }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenuOpen(false) }
     document.addEventListener('mousedown', onDocClick)
     document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('mousedown', onDocClick)
-      document.removeEventListener('keydown', onKey)
-    }
+    return () => { document.removeEventListener('mousedown', onDocClick); document.removeEventListener('keydown', onKey) }
   }, [])
 
   // On-chain data
@@ -415,7 +210,7 @@ const Dashboard: React.FC = () => {
     },
   })
 
-  // Mining stats (kept for future, not rendered here)
+  // Mining stats query kept for invalidation (not displayed)
   useQuery<{ count: number; totalDeposited: string }>({
     queryKey: ['miningStats', account],
     enabled: isValidAddress(account),
@@ -426,12 +221,8 @@ const Dashboard: React.FC = () => {
     },
   })
 
-  // Off-chain stats (coin balance + login days)
-  const {
-    data: stats,
-    isLoading: isStatsLoading,
-    refetch: refetchStatsLite,
-  } = useQuery<StatsResponse | null>({
+  // Off-chain stats for coin balance + login days
+  const { data: stats, isLoading: isStatsLoading, refetch: refetchStatsLite } = useQuery<StatsResponse | null>({
     queryKey: ['stats-lite', account],
     enabled: isValidAddress(account),
     retry: false,
@@ -451,46 +242,24 @@ const Dashboard: React.FC = () => {
   })
 
   const referralCode = useMemo(() => (userId || '').toUpperCase(), [userId])
-  const displayUserId = useMemo(
-    () => (userId || stats?.userId || 'USER').toUpperCase(),
-    [userId, stats?.userId]
-  )
-  const referralLink = useMemo(
-    () => `${window.location.origin}/register?ref=${referralCode}`,
-    [referralCode]
-  )
+  const displayUserId = useMemo(() => (userId || stats?.userId || 'USER').toUpperCase(), [userId, stats?.userId])
+  const referralLink = useMemo(() => `${window.location.origin}/register?ref=${referralCode}`, [referralCode])
 
   const safeMoney = (val?: string) => {
-    const n = parseFloat(val || '0')
-    if (isNaN(n)) return '0.00'
-    return n.toFixed(2)
+    const n = parseFloat(val || '0'); return isNaN(n) ? '0.00' : n.toFixed(2)
   }
-
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text)
-    showSuccessToast('Copied to clipboard')
-  }
-
+  const copyToClipboard = (text: string) => { navigator.clipboard.writeText(text); showSuccessToast('Copied to clipboard') }
   const coinBalance = stats?.coin_balance ?? 0
 
-  // ---------------- Handlers ----------------
+  // Handlers
   const handleUserPayout = async () => {
-    if (!onChainData?.hasFundCode) {
-      showErrorToast('Fund code not set. Please register with a fund code.')
-      return
-    }
-    const code = window.prompt('Enter your secret Fund Code')
-    if (!code) return
+    if (!onChainData?.hasFundCode) { showErrorToast('Fund code not set. Please register with a fund code.'); return }
+    const code = window.prompt('Enter your secret Fund Code'); if (!code) return
     setIsProcessing(true)
     try {
-      const tx = await withdrawWithFundCode(code)
-      if ((tx as any)?.wait) await (tx as any).wait()
+      const tx = await withdrawWithFundCode(code); if ((tx as any)?.wait) await (tx as any).wait()
       showSuccessToast('Payout successful!')
-    } catch (e) {
-      showErrorToast(e, 'Payout failed')
-    } finally {
-      setIsProcessing(false)
-    }
+    } catch (e) { showErrorToast(e, 'Payout failed') } finally { setIsProcessing(false) }
   }
 
   const handleMarkTodayLogin = async () => {
@@ -501,54 +270,29 @@ const Dashboard: React.FC = () => {
       await markLogin(account!, timestamp, signature)
       showSuccessToast('Login counted for today')
       await refetchStatsLite()
-    } catch (e) {
-      showErrorToast(e, 'Unable to mark login')
-    } finally {
-      setIsProcessing(false)
-    }
+    } catch (e) { showErrorToast(e, 'Unable to mark login') } finally { setIsProcessing(false) }
   }
 
-  // Mining form with cookie persisted amount
+  // Persisted mining amount
   const [miningAmount, setMiningAmount] = useState<string>(() => getCookie('miningAmount') || '5.00')
-  useEffect(() => {
-    setCookie('miningAmount', miningAmount || '', 30)
-  }, [miningAmount])
+  useEffect(() => { setCookie('miningAmount', miningAmount || '', 30) }, [miningAmount])
 
   const amountNum = Number(miningAmount || '0')
   const isInvalidAmount = miningAmount !== '' && (isNaN(amountNum) || amountNum < 5)
 
   const handleBuyMiner = async () => {
     if (!isValidAddress(account)) return
-    if (isNaN(amountNum) || amountNum < 5) {
-      showErrorToast('Minimum 5 USDT required.')
-      return
-    }
+    if (isNaN(amountNum) || amountNum < 5) { showErrorToast('Minimum 5 USDT required.'); return }
     setIsProcessing(true)
     try {
-      const tx1 = await approveUSDT(miningAmount)
-      if ((tx1 as any)?.wait) await (tx1 as any).wait()
-      const tx2 = await buyMiner(miningAmount)
-      if ((tx2 as any)?.wait) await (tx2 as any).wait()
+      const tx1 = await approveUSDT(miningAmount); if ((tx1 as any)?.wait) await (tx1 as any).wait()
+      const tx2 = await buyMiner(miningAmount); if ((tx2 as any)?.wait) await (tx2 as any).wait()
       showSuccessToast(`Purchased $${Number(miningAmount).toFixed(2)} mining power`)
       queryClient.invalidateQueries({ queryKey: ['miningStats', account] })
-    } catch (e) {
-      showErrorToast(e, 'Failed to buy miner')
-    } finally {
-      setIsProcessing(false)
-    }
+    } catch (e) { showErrorToast(e, 'Failed to buy miner') } finally { setIsProcessing(false) }
   }
 
-  // --------------- Cards with shared surface ---------------
-  const Surface: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-    <div className="lxr-surface" style={{ position: 'relative' }}>
-      <div className="lxr-surface-lines" />
-      <div className="lxr-surface-mesh" />
-      <div className="lxr-surface-circuit" />
-      <div className="lxr-surface-holo" />
-      <div style={{ position: 'relative', zIndex: 2 }}>{children}</div>
-    </div>
-  )
-
+  // Views
   const renderHome = () => (
     <div style={styles.grid}>
       <div style={styles.cardShell}>
@@ -560,11 +304,7 @@ const Dashboard: React.FC = () => {
             <div style={styles.balance}>${safeMoney(onChainData?.userBalance)}</div>
           )}
           <div style={styles.row}>
-            <button
-              style={styles.button}
-              disabled={isProcessing || isOnChainLoading}
-              onClick={handleUserPayout}
-            >
+            <button style={styles.button} disabled={isProcessing || isOnChainLoading} onClick={handleUserPayout}>
               Payout
             </button>
           </div>
@@ -583,18 +323,14 @@ const Dashboard: React.FC = () => {
             <div style={{ ...styles.small, marginBottom: 4 }}>Referral Code</div>
             <div style={styles.copyWrap}>
               <input style={styles.input} readOnly value={referralCode || ''} />
-              <button style={styles.button} onClick={() => copyToClipboard(referralCode)}>
-                Copy
-              </button>
+              <button style={styles.button} onClick={() => copyToClipboard(referralCode)}>Copy</button>
             </div>
           </div>
           <div>
             <div style={{ ...styles.small, marginBottom: 4 }}>Referral Link</div>
             <div style={styles.copyWrap}>
               <input style={styles.input} readOnly value={referralLink} />
-              <button style={styles.button} onClick={() => copyToClipboard(referralLink)}>
-                Copy
-              </button>
+              <button style={styles.button} onClick={() => copyToClipboard(referralLink)}>Copy</button>
             </div>
           </div>
         </Surface>
@@ -602,146 +338,109 @@ const Dashboard: React.FC = () => {
     </div>
   )
 
-  const renderSurprise = () => {
-    return (
-      <div style={styles.grid}>
-        <div style={styles.cardShell}>
-          <Surface>
-            <h3 style={styles.cardTitle}>Total Coin Balance</h3>
-            <div style={styles.balance}>{isStatsLoading ? '...' : coinBalance}</div>
-            <button style={styles.buttonGhost} disabled>
-              Withdraw (Coming Soon)
-            </button>
-          </Surface>
-        </div>
+  const renderSurprise = () => (
+    <div style={styles.grid}>
+      <div style={styles.cardShell}>
+        <Surface>
+          <h3 style={styles.cardTitle}>Total Coin Balance</h3>
+          <div style={styles.balance}>{isStatsLoading ? '...' : coinBalance}</div>
+          <button style={styles.buttonGhost} disabled>Withdraw (Coming Soon)</button>
+        </Surface>
+      </div>
 
-        {/* Mining area: only the card, no title below/above */}
-        <div style={styles.cardShell}>
-          {/* Inject shared + mining CSS */}
-          <style dangerouslySetInnerHTML={{ __html: sharedLexoriCSS }} />
-          <div className="lxr-mining-card">
-            <div className="lxr-network-lines" />
-            <div className="lxr-crypto-mesh" />
-            <div className="lxr-circuit" />
-            <div className="lxr-holo" />
+      {/* Mining area: only the card (no extra heading/below text) */}
+      <div style={styles.cardShell}>
+        <div className="lxr-mining-card">
+          <div className="lxr-network-lines" />
+          <div className="lxr-crypto-mesh" />
+          <div className="lxr-circuit" />
+          <div className="lxr-holo" />
 
-            <div style={{ position: 'relative', zIndex: 2 }}>
-              {/* Header */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
-                <div>
-                  <div className="lxr-lexori-logo" style={{ fontSize: 22, fontWeight: 900, letterSpacing: 1 }}>
-                    LEXORI
-                  </div>
-                  <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, color: colors.accent }}>
-                    MINING CARD
-                  </div>
+          <div style={{ position: 'relative', zIndex: 2 }}>
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+              <div>
+                <div className="lxr-lexori-logo" style={{ fontSize: 22, fontWeight: 900, letterSpacing: 1 }}>
+                  LEXORI
                 </div>
-                <div style={{
-                  width: 42, height: 42, borderRadius: 9999,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  background: 'linear-gradient(45deg, #14b8a6, #e8f9f1)', color: '#000', fontWeight: 800
-                }}>
-                  L
+                <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, color: colors.accent }}>
+                  MINING CARD
                 </div>
               </div>
-
-              {/* Info */}
-              <div style={{ textAlign: 'center', marginBottom: 12, fontSize: 13, fontWeight: 600, color: colors.accent }}>
-                You will receive coins equal to your investment amount daily for 30 days
+              <div style={{
+                width: 42, height: 42, borderRadius: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: 'linear-gradient(45deg, #14b8a6, #e8f9f1)', color: '#000', fontWeight: 800
+              }}>
+                L
               </div>
+            </div>
 
-              {/* Purchase */}
-              <div className="lxr-panel">
-                <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
-                  <div style={{ flex: 1 }}>
-                    <label htmlFor="lxr-qty" style={{ display: 'block', fontSize: 11, fontWeight: 700, marginBottom: 4, color: colors.accent }}>
-                      Quantity (USD)
-                    </label>
-                    <input
-                      id="lxr-qty"
-                      className={`lxr-quantity ${isInvalidAmount ? 'lxr-invalid' : ''}`}
-                      type="number"
-                      min={5}
-                      step="0.01"
-                      placeholder="5.00"
-                      value={miningAmount}
-                      onChange={(e) => setMiningAmount(e.target.value)}
-                    />
-                  </div>
-                  <button
-                    className="lxr-buy-btn"
-                    onClick={handleBuyMiner}
-                    disabled={isProcessing}
-                  >
-                    {isProcessing ? 'PROCESSING...' : 'BUY NOW'}
-                  </button>
+            {/* Purchase */}
+            <div className="lxr-panel">
+              <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+                <div style={{ flex: 1 }}>
+                  <label htmlFor="lxr-qty" style={{ display: 'block', fontSize: 11, fontWeight: 700, marginBottom: 4, color: colors.accent }}>
+                    Quantity (USD)
+                  </label>
+                  <input
+                    id="lxr-qty"
+                    className={`lxr-quantity ${isInvalidAmount ? 'lxr-invalid' : ''}`}
+                    type="number"
+                    min={5}
+                    step="0.01"
+                    placeholder="5.00"
+                    value={miningAmount}
+                    onChange={(e) => setMiningAmount(e.target.value)}
+                  />
                 </div>
+                <button className="lxr-buy-btn" onClick={handleBuyMiner} disabled={isProcessing}>
+                  {isProcessing ? 'PROCESSING...' : 'BUY NOW'}
+                </button>
               </div>
             </div>
           </div>
-          {/* Note: as per requirement, no extra text or stats below the mining card */}
-        </div>
-
-        <div style={styles.cardShell}>
-          <Surface>
-            <h3 style={styles.cardTitle}>Your Stats</h3>
-            <div style={styles.statRow}>
-              <div style={styles.statBox}>
-                <div style={styles.statLabel}>Total Refer (L1)</div>
-                <div style={styles.statValue}>{isRefsLoading ? '...' : referralList.length}</div>
-              </div>
-              <div style={styles.statBox}>
-                <div style={styles.statLabel}>Total Login (days)</div>
-                <div style={styles.statValue}>{isStatsLoading ? '...' : (stats?.logins?.total_login_days ?? 0)}</div>
-              </div>
-            </div>
-            <div style={{ ...styles.row, marginTop: 8 }}>
-              <button
-                style={styles.button}
-                disabled={isProcessing || !account}
-                onClick={handleMarkTodayLogin}
-              >
-                Mark Today’s Login
-              </button>
-            </div>
-            {/* Registration fee / Commission details removed as per requirement */}
-          </Surface>
         </div>
       </div>
-    )
-  }
+
+      <div style={styles.cardShell}>
+        <Surface>
+          <h3 style={styles.cardTitle}>Your Stats</h3>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 8 }}>
+            <div style={{ background: 'rgba(0,0,0,0.30)', border: `1px solid ${colors.grayLine}`, borderRadius: 12, padding: 10, textAlign: 'center' }}>
+              <div style={{ fontSize: 12, color: colors.textMuted }}>Total Refer (L1)</div>
+              <div style={{ fontSize: 22, fontWeight: 900 }}>{isRefsLoading ? '...' : referralList.length}</div>
+            </div>
+            <div style={{ background: 'rgba(0,0,0,0.30)', border: `1px solid ${colors.grayLine}`, borderRadius: 12, padding: 10, textAlign: 'center' }}>
+              <div style={{ fontSize: 12, color: colors.textMuted }}>Total Login (days)</div>
+              <div style={{ fontSize: 22, fontWeight: 900 }}>{isStatsLoading ? '...' : (stats?.logins?.total_login_days ?? 0)}</div>
+            </div>
+          </div>
+          <div style={{ ...styles.row, marginTop: 8 }}>
+            <button style={styles.button} disabled={isProcessing || !account} onClick={handleMarkTodayLogin}>
+              Mark Today’s Login
+            </button>
+          </div>
+          {/* Registration fee / commission text removed as requested */}
+        </Surface>
+      </div>
+    </div>
+  )
 
   return (
     <div style={styles.page}>
       <div style={styles.container}>
         <div style={styles.topBar}>
-          {/* Brand with gradient text (using class from shared CSS) */}
-          <style dangerouslySetInnerHTML={{ __html: sharedLexoriCSS }} />
           <div className="lxr-lexori-logo" style={styles.brand as any}>Web3 Community</div>
 
-          {/* userId + user icon with dropdown (SVG icon) */}
+          {/* User menu */}
           <div style={styles.userMenuWrap} ref={menuRef}>
             <span style={styles.userIdText} title={displayUserId}>{displayUserId}</span>
-            <button
-              style={styles.userMenuBtn}
-              onClick={() => setMenuOpen((v) => !v)}
-              aria-haspopup="menu"
-              aria-expanded={menuOpen}
-              aria-label="User menu"
-              title="User menu"
-            >
+            <button style={styles.userMenuBtn} onClick={() => setMenuOpen(v => !v)} aria-haspopup="menu" aria-expanded={menuOpen} aria-label="User menu">
               <IconUser size={18} />
             </button>
             {menuOpen && (
               <div style={styles.dropdown} role="menu">
-                <button
-                  style={styles.dropdownItem}
-                  onClick={() => {
-                    setMenuOpen(false)
-                    disconnect()
-                  }}
-                  role="menuitem"
-                >
+                <button style={styles.dropdownItem} onClick={() => { setMenuOpen(false); disconnect() }} role="menuitem">
                   Logout
                 </button>
               </div>
@@ -751,7 +450,7 @@ const Dashboard: React.FC = () => {
 
         {activeTab === 'home' ? renderHome() : renderSurprise()}
 
-        {/* Bottom fixed navigation (SVG icons) */}
+        {/* Bottom nav */}
         <div style={styles.bottomNavWrap}>
           <div className="lxr-surface" style={{ padding: 8, borderRadius: 14 }}>
             <div className="lxr-surface-lines" />
@@ -760,20 +459,10 @@ const Dashboard: React.FC = () => {
             <div className="lxr-surface-holo" />
             <div style={{ position: 'relative', zIndex: 2 }}>
               <div style={styles.bottomNav}>
-                <button
-                  style={{ ...styles.navBtn, ...(activeTab === 'home' ? styles.navBtnActive : {}) }}
-                  onClick={() => setActiveTab('home')}
-                  title="Home"
-                  aria-label="Home"
-                >
+                <button style={{ ...styles.navBtn, ...(activeTab === 'home' ? styles.navBtnActive : {}) }} onClick={() => setActiveTab('home')} title="Home" aria-label="Home">
                   <IconHome size={20} />
                 </button>
-                <button
-                  style={{ ...styles.navBtn, ...(activeTab === 'surprise' ? styles.navBtnActive : {}) }}
-                  onClick={() => setActiveTab('surprise')}
-                  title="Surprise"
-                  aria-label="Surprise"
-                >
+                <button style={{ ...styles.navBtn, ...(activeTab === 'surprise' ? styles.navBtnActive : {}) }} onClick={() => setActiveTab('surprise')} title="Surprise" aria-label="Surprise">
                   <IconSurpriseCoin size={20} />
                 </button>
               </div>
