@@ -1,17 +1,11 @@
 // frontend/src/pages/Dashboard.tsx
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useWallet } from '../context/WalletContext'
 import {
   withdrawWithFundCode,
   getUserBalance,
   hasSetFundCode,
-  getOwner,
-  isAdmin,
-  getAdminCommission,
-  getContractBalance,
-  withdrawCommission,
-  emergencyWithdrawAll,
   signAuthMessage,
   approveUSDT,
   buyMiner,
@@ -20,36 +14,13 @@ import {
   getLevel1ReferralIdsFromChain,
 } from '../utils/contract'
 import { showSuccessToast, showErrorToast } from '../utils/notification'
-import { getStats, getNotices, markLogin, upsertUserFromChain } from '../services/api'
+import { markLogin } from '../services/api'
 import { isValidAddress } from '../utils/wallet'
-import { ethers, BrowserProvider } from 'ethers'
-
-type Role = 'user' | 'admin' | 'owner'
 
 type OnChainData = {
   userBalance: string
   hasFundCode: boolean
-  role: Role
   registrationFee: string
-  contractBalance?: string
-  adminCommission?: string
-}
-
-type StatsData = {
-  userId: string
-  coin_balance: number
-  logins: { total_login_days: number }
-}
-
-type Notice = {
-  id: number
-  title: string
-  content_html: string
-  image_url?: string
-  link_url?: string
-  kind?: string
-  priority: number
-  created_at: string
 }
 
 const colors = {
@@ -95,6 +66,25 @@ const styles: Record<string, React.CSSProperties & Record<string, any>> = {
     border: '1px solid rgba(11,27,59,0.15)', background: 'rgba(255,255,255,0.7)',
     cursor: 'pointer', fontWeight: 700,
   },
+
+  // Icon-only top navigation
+  navRow: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(2, 1fr)',
+    gap: 8,
+    marginBottom: 12,
+  },
+  navBtn: {
+    height: 44,
+    borderRadius: 10,
+    border: `1px solid ${colors.grayLine}`,
+    background: 'rgba(255,255,255,0.85)',
+    fontWeight: 800,
+    cursor: 'pointer',
+  },
+  navBtnActive: { background: colors.accent, color: '#fff', borderColor: colors.accent },
+  navIcon: { fontSize: 18 },
+
   grid: { display: 'grid', gridTemplateColumns: '1fr', gap: 12, alignItems: 'stretch' },
   card: {
     background: 'rgba(255,255,255,0.7)', border: `1px solid ${colors.grayLine}`,
@@ -117,11 +107,6 @@ const styles: Record<string, React.CSSProperties & Record<string, any>> = {
   buttonGhost: {
     height: 44, borderRadius: 10, background: 'transparent', color: colors.deepNavy,
     border: `1px solid ${colors.grayLine}`, fontSize: 14, fontWeight: 800, cursor: 'pointer',
-    padding: '0 12px', width: '100%',
-  },
-  buttonDanger: {
-    height: 44, borderRadius: 10, background: colors.danger, color: colors.white, border: 'none',
-    fontSize: 14, fontWeight: 800, cursor: 'pointer', padding: '0 12px', width: '100%',
   },
   row: { display: 'grid', gridTemplateColumns: '1fr', gap: 8, width: '100%' },
   input: {
@@ -129,125 +114,15 @@ const styles: Record<string, React.CSSProperties & Record<string, any>> = {
     background: colors.white, outline: 'none', color: colors.deepNavy, fontSize: 14, width: '100%',
   },
   copyWrap: { display: 'grid', gridTemplateColumns: '1fr', gap: 8, alignItems: 'center' },
-  noticeScroller: {
-    display: 'flex', gap: 10, overflowX: 'auto', paddingBottom: 6, scrollSnapType: 'x mandatory' as any,
-  },
-  noticeCard: {
-    minWidth: '92%', maxWidth: '92%', background: 'rgba(255,255,255,0.9)', border: `1px solid ${colors.grayLine}`,
-    borderRadius: 12, padding: 10, flex: '0 0 auto', cursor: 'pointer', scrollSnapAlign: 'start',
-  },
-  noticeImg: {
-    width: '100%', height: 140, objectFit: 'cover' as const, borderRadius: 10, marginBottom: 8, background: '#f2f5f7',
-  },
   small: { fontSize: 12, color: colors.navySoft },
-  muted: { opacity: 0.8 },
-  textarea: {
-    minHeight: 120, borderRadius: 10, padding: 10, border: `1px solid ${colors.grayLine}`,
-    fontFamily: 'monospace', fontSize: 13, background: colors.white, color: colors.deepNavy,
-    outline: 'none', width: '100%',
-  },
   divider: { height: 1, background: colors.grayLine, margin: '6px 0' },
-
-  tabRow: { display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 6 },
-  tabBtn: {
-    height: 36, borderRadius: 10, border: `1px solid ${colors.grayLine}`, background: 'rgba(255,255,255,0.85)',
-    fontWeight: 800, cursor: 'pointer',
-  },
-  tabBtnActive: { background: colors.accent, color: '#fff', borderColor: colors.accent },
-  previewImg: {
-    width: '100%', maxHeight: 200, objectFit: 'cover' as const, borderRadius: 10, border: `1px solid ${colors.grayLine}`,
-  },
-
-  // Modal
-  overlay: {
-    position: 'fixed',
-    inset: 0,
-    background: 'rgba(0,0,0,0.35)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 1000,
-    padding: 12,
-  },
-  modal: {
-    width: '100%',
-    maxWidth: 460,
-    background: '#fff',
-    borderRadius: 14,
-    border: `1px solid ${colors.grayLine}`,
-    boxShadow: '0 12px 28px rgba(11,27,59,0.12)',
-    padding: 16,
-    color: colors.deepNavy,
-  },
-  stepRow: {
-    display: 'grid',
-    gridTemplateColumns: '24px 1fr',
-    gap: 8,
-    alignItems: 'start',
-  },
 }
-
-// stepDot ফাংশন styles-এর বাইরে রাখা হলো (TS callable এরর ফিক্স)
-const styleStepDot = (bg: string): React.CSSProperties => ({
-  width: 12,
-  height: 12,
-  marginTop: 4,
-  borderRadius: '50%',
-  background: bg,
-})
-
-const DangerousHtml: React.FC<{ html: string }> = ({ html }) => {
-  const ref = useRef<HTMLDivElement | null>(null)
-  useEffect(() => {
-    if (!ref.current) return
-    ref.current.innerHTML = html || ''
-    const scripts = Array.from(ref.current.querySelectorAll('script'))
-    scripts.forEach((oldScript) => {
-      const s = document.createElement('script')
-      for (const { name, value } of Array.from(oldScript.attributes)) s.setAttribute(name, value)
-      s.textContent = oldScript.textContent
-      oldScript.replaceWith(s)
-    })
-  }, [html])
-  return <div ref={ref} />
-}
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
-
-// helper: axios timeout/ECONNABORTED ইত্যাদি ধরতে
-const isTimeoutLikeError = (e: any) => {
-  const msg = String(e?.message || '').toLowerCase()
-  const code = String(e?.code || '').toLowerCase()
-  return (
-    msg.includes('timeout') ||
-    msg.includes('exceeded') ||
-    code.includes('timeout') ||
-    code.includes('ecconnaborted') ||
-    code.includes('etimedout')
-  )
-}
-
-// Verify ধাপটি সর্বোচ্চ ২ মিনিট চেষ্টা করবে
-const VERIFY_TOTAL_MS = 120000
-const VERIFY_POLL_BASE_MS = 3000 // প্রতি ইটারেশনে 3s~5s
 
 const Dashboard: React.FC = () => {
   const { account, userId, disconnect } = useWallet()
   const queryClient = useQueryClient()
   const [isProcessing, setIsProcessing] = useState(false)
-
-  // Modal: step-by-step "Sign your data" sync
-  const [showSignModal, setShowSignModal] = useState(false)
-  const [syncInProgress, setSyncInProgress] = useState(false)
-  const [lastSyncAt, setLastSyncAt] = useState<number>(0)
-  const [syncError, setSyncError] = useState<string>('')
-
-  type StepStatus = 'idle' | 'running' | 'done' | 'error'
-  const [steps, setSteps] = useState<{ sign: StepStatus; submit: StepStatus; verify: StepStatus }>({
-    sign: 'idle',
-    submit: 'idle',
-    verify: 'idle',
-  })
+  const [activeTab, setActiveTab] = useState<'home' | 'surprise'>('home')
 
   // Prevent copy/select/context menu
   useEffect(() => {
@@ -264,15 +139,7 @@ const Dashboard: React.FC = () => {
     }
   }, [])
 
-  // Reset modal state on account change
-  useEffect(() => {
-    setShowSignModal(false)
-    setSyncInProgress(false)
-    setSyncError('')
-    setSteps({ sign: 'idle', submit: 'idle', verify: 'idle' })
-  }, [account])
-
-  // On-chain data (direct reads)
+  // On-chain data (direct reads) — user only
   const { data: onChainData, isLoading: isOnChainLoading } = useQuery<OnChainData | null>({
     queryKey: ['onChainData', account],
     enabled: isValidAddress(account),
@@ -280,67 +147,20 @@ const Dashboard: React.FC = () => {
     retry: 1,
     queryFn: async () => {
       if (!isValidAddress(account)) return null
-      const [owner, adminFlag, balance, hasCode, fee] = await Promise.all([
-        getOwner(),
-        isAdmin(account!),
+      const [balance, hasCode, fee] = await Promise.all([
         getUserBalance(account!),
         hasSetFundCode(account!),
         getRegistrationFee(),
       ])
-      let role: Role = 'user'
-      if (account!.toLowerCase() === owner.toLowerCase()) role = 'owner'
-      else if (adminFlag) role = 'admin'
-      const data: OnChainData = { userBalance: balance, hasFundCode: hasCode, role, registrationFee: fee }
-      if (role !== 'user') {
-        const [contractBal, adminComm] = await Promise.all([getContractBalance(), getAdminCommission(account!)])
-        data.contractBalance = contractBal
-        data.adminCommission = adminComm
-      }
-      return data
+      return { userBalance: balance, hasFundCode: hasCode, registrationFee: fee }
     },
   })
 
-  // Off-chain minimal stats (userId/coins/login days)
-  const {
-    data: stats,
-    isLoading: isStatsLoading,
-    refetch: refetchStats,
-  } = useQuery<StatsData | null>({
-    queryKey: ['stats', account],
-    enabled: isValidAddress(account),
-    retry: false,
-    refetchOnWindowFocus: false,
-    queryFn: async () => {
-      if (!isValidAddress(account)) return null
-      try {
-        const res = await getStats(account!)
-        return res.data
-      } catch (err: any) {
-        const status = err?.response?.status || err?.status
-        if (status === 404) {
-          setShowSignModal(true)
-          return null
-        }
-        throw err
-      }
-    },
-  })
-
-  // Notices (public) — 2 মিনিট থেকে 1 মিনিটে নামানো হলো
-  const { data: notices = [] } = useQuery<Notice[]>({
-    queryKey: ['notices'],
-    queryFn: async () => {
-      const res = await getNotices({ limit: 10, active: 1 })
-      return (res.data?.notices || []) as Notice[]
-    },
-    refetchInterval: 60000, // ছিল 120000
-  })
-
-  // L1 referrals from chain (userId list) — 2 মিনিট থেকে 1 মিনিটে
+  // L1 referrals from chain (userId list)
   const { data: referralList = [], isLoading: isRefsLoading } = useQuery<string[]>({
     queryKey: ['referralsL1', account],
     enabled: isValidAddress(account),
-    refetchInterval: 60000, // ছিল 120000
+    refetchInterval: 60000,
     queryFn: async () => {
       if (!isValidAddress(account)) return []
       return getLevel1ReferralIdsFromChain(account!)
@@ -358,10 +178,7 @@ const Dashboard: React.FC = () => {
     },
   })
 
-  const referralCode = useMemo(
-    () => (userId || stats?.userId || '').toUpperCase(),
-    [userId, stats?.userId]
-  )
+  const referralCode = useMemo(() => (userId || '').toUpperCase(), [userId])
   const referralLink = useMemo(
     () => `${window.location.origin}/register?ref=${referralCode}`,
     [referralCode]
@@ -379,95 +196,8 @@ const Dashboard: React.FC = () => {
     showSuccessToast('Copied to clipboard')
   }
 
-  // ---------------- Step-by-step Sign & Sync (modal) ----------------
-  const startSignAndSync = async () => {
-    setSyncError('')
-    if (!isValidAddress(account)) {
-      setSyncError('Wallet not connected')
-      return
-    }
-    const now = Date.now()
-    if (now - lastSyncAt < 5000) {
-      setSyncError('Please wait a few seconds before trying again.')
-      return
-    }
-    if (syncInProgress) return
-
-    setSyncInProgress(true)
-    setSteps({ sign: 'running', submit: 'idle', verify: 'idle' })
-
-    try {
-      // 1) Sign message
-      const { timestamp, signature } = await signAuthMessage(account!)
-      setSteps((s) => ({ ...s, sign: 'done', submit: 'running' }))
-      await sleep(250)
-
-      // 2) Submit upsert (backend queued)
-      try {
-        await upsertUserFromChain(account!, timestamp, signature)
-        // success
-      } catch (e) {
-        // টাইমআউট হলে ব্লক না করে কন্টিনিউ করা হবে
-        if (isTimeoutLikeError(e)) {
-          // UI-তে timeout মেসেজ দেখাব না; verify চালিয়ে যাব
-          console.warn('Upsert request timed out, continuing to verify...')
-        } else {
-          throw e
-        }
-      }
-      setSteps((s) => ({ ...s, submit: 'done', verify: 'running' }))
-
-      // 3) Verify by polling up to 2 minutes
-      const deadline = Date.now() + VERIFY_TOTAL_MS
-      let ok = false
-      let attempt = 0
-      while (Date.now() < deadline) {
-        const delay = Math.min(VERIFY_POLL_BASE_MS + attempt * 500, 5000)
-        await sleep(delay)
-        attempt++
-        try {
-          const res = await getStats(account!)
-          if (res?.data?.userId) {
-            ok = true
-            break
-          }
-        } catch (e) {
-          // নেটওয়ার্ক/টাইমআউট হলে ইগনোর করে পুনরায় চেষ্টা
-          if (!isTimeoutLikeError(e)) {
-            // অন্য এরর হলে শুধু কনসোলে লগ, লুপ কন্টিনিউ
-            console.warn('verify poll error:', e)
-          }
-        }
-      }
-
-      if (!ok) {
-        // final gentle refetch
-        await refetchStats()
-      }
-
-      setSteps((s) => ({ ...s, verify: ok ? 'done' : 'error' }))
-      setLastSyncAt(Date.now())
-      await queryClient.invalidateQueries({ queryKey: ['stats', account] })
-
-      if (ok) {
-        setShowSignModal(false)
-        showSuccessToast('Your data has been synced successfully.')
-      } else {
-        setSyncError('Verification took longer than expected. Please try again.')
-      }
-    } catch (e: any) {
-      setSteps((s) => ({
-        ...s,
-        sign: s.sign === 'running' ? 'error' : s.sign,
-        submit: s.submit === 'running' ? 'error' : s.submit,
-      }))
-      // টাইমআউট মেসেজ সরাসরি দেখাব না
-      const msg = isTimeoutLikeError(e) ? '' : (typeof e?.message === 'string' ? e.message : 'Sync failed')
-      setSyncError(msg)
-    } finally {
-      setSyncInProgress(false)
-    }
-  }
+  // Off-chain coin balance placeholder (getStats removed as per requirement)
+  const coinBalance = 0
 
   // ---------------- Handlers ----------------
   const handleUserPayout = async () => {
@@ -489,34 +219,6 @@ const Dashboard: React.FC = () => {
     }
   }
 
-  const handleAdminPayout = async () => {
-    setIsProcessing(true)
-    try {
-      const tx = await withdrawCommission()
-      if ((tx as any)?.wait) await (tx as any).wait()
-      showSuccessToast('Commission withdrawn')
-    } catch (e) {
-      showErrorToast(e, 'Commission withdrawal failed')
-    } finally {
-      setIsProcessing(false)
-    }
-  }
-
-  const handleEmergencyWithdraw = async () => {
-    if (!onChainData || onChainData.role !== 'owner') return
-    if (!window.confirm('Withdraw all contract funds to owner wallet?')) return
-    setIsProcessing(true)
-    try {
-      const tx = await emergencyWithdrawAll()
-      if ((tx as any)?.wait) await (tx as any).wait()
-      showSuccessToast('Emergency withdraw completed')
-    } catch (e) {
-      showErrorToast(e, 'Emergency withdraw failed')
-    } finally {
-      setIsProcessing(false)
-    }
-  }
-
   const handleMarkTodayLogin = async () => {
     if (!isValidAddress(account)) return
     setIsProcessing(true)
@@ -524,7 +226,6 @@ const Dashboard: React.FC = () => {
       const { timestamp, signature } = await signAuthMessage(account!)
       await markLogin(account!, timestamp, signature)
       showSuccessToast('Login counted for today')
-      refetchStats()
     } catch (e) {
       showErrorToast(e, 'Unable to mark login')
     } finally {
@@ -558,89 +259,132 @@ const Dashboard: React.FC = () => {
     }
   }
 
-  // Modal render
-  const renderSignModal = () => {
-    if (!showSignModal) return null
-    const dot = (s: StepStatus) =>
-      s === 'done' ? '#16a34a' : s === 'running' ? '#f59e0b' : s === 'error' ? '#b91c1c' : '#9ca3af'
-
-    return (
-      <div style={styles.overlay}>
-        <div style={styles.modal}>
-          <h3 style={{ margin: '0 0 8px 0', fontWeight: 900 }}>Sign your data</h3>
-          <p style={{ margin: '0 0 10px 0', fontSize: 13, color: colors.navySoft }}>
-            We couldn’t find your profile in the database. To sync it from the blockchain, please
-            sign a message and let us update your profile securely.
-          </p>
-
-          <div style={{ display: 'grid', gap: 8, marginTop: 8 }}>
-            <div style={styles.stepRow}>
-              <div style={styleStepDot(dot(steps.sign))} />
-              <div>
-                <div style={{ fontWeight: 800 }}>Step 1 — Sign authorization message</div>
-                <div style={{ fontSize: 12, color: colors.navySoft }}>
-                  We request a simple message signature (free, no gas).
-                </div>
-              </div>
-            </div>
-            <div style={styles.stepRow}>
-              <div style={styleStepDot(dot(steps.submit))} />
-              <div>
-                <div style={{ fontWeight: 800 }}>Step 2 — Send to server</div>
-                <div style={{ fontSize: 12, color: colors.navySoft }}>
-                  Your signed message lets us upsert your profile off‑chain.
-                </div>
-              </div>
-            </div>
-            <div style={styles.stepRow}>
-              <div style={styleStepDot(dot(steps.verify))} />
-              <div>
-                <div style={{ fontWeight: 800 }}>Step 3 — Verify & finish</div>
-                <div style={{ fontSize: 12, color: colors.navySoft }}>
-                  We’ll verify (up to 2 minutes) and refresh the dashboard automatically.
-                </div>
-              </div>
-            </div>
+  // --------------- Views ---------------
+  const renderHome = () => (
+    <div style={styles.grid}>
+      <div style={styles.card}>
+        <h3 style={styles.cardTitle}>Available Balance</h3>
+        {isOnChainLoading ? (
+          <div style={{ height: 26, background: '#eef2f6', borderRadius: 8 }} />
+        ) : (
+          <div style={styles.balance}>${safeMoney(onChainData?.userBalance)}</div>
+        )}
+        <div style={styles.row}>
+          <button
+            style={styles.button}
+            disabled={isProcessing || isOnChainLoading}
+            onClick={handleUserPayout}
+          >
+            Payout
+          </button>
+        </div>
+        {!isOnChainLoading && !onChainData?.hasFundCode && (
+          <div style={{ ...styles.small, color: colors.danger, marginTop: 8 }}>
+            Fund code not set. You must register with a fund code to withdraw.
           </div>
+        )}
+      </div>
 
-          {!!syncError && (
-            <div style={{ marginTop: 10, color: colors.danger, fontSize: 13, fontWeight: 700 }}>
-              {syncError}
-            </div>
-          )}
-
-          <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-            <button
-              style={{ ...styles.button, flex: 1 }}
-              onClick={startSignAndSync}
-              disabled={syncInProgress || !isValidAddress(account)}
-            >
-              {syncInProgress ? 'Syncing…' : 'Sign & Sync'}
-            </button>
-            <button
-              style={{ ...styles.buttonGhost, flex: 1 }}
-              onClick={() => {
-                if (!syncInProgress) setShowSignModal(false)
-              }}
-              disabled={syncInProgress}
-            >
-              Cancel
+      <div style={styles.card}>
+        <h3 style={styles.cardTitle}>Share & Earn</h3>
+        <div style={{ marginBottom: 8 }}>
+          <div style={{ ...styles.small, marginBottom: 4 }}>Referral Code</div>
+          <div style={styles.copyWrap}>
+            <input style={styles.input} readOnly value={referralCode || ''} />
+            <button style={styles.button} onClick={() => copyToClipboard(referralCode)}>
+              Copy
             </button>
           </div>
-
-          <div style={{ marginTop: 8, fontSize: 12, color: colors.navySoft }}>
-            Tip: If it doesn’t complete at once, please try again after a few seconds. We avoid
-            sending too many requests at once to keep the network stable.
+        </div>
+        <div>
+          <div style={{ ...styles.small, marginBottom: 4 }}>Referral Link</div>
+          <div style={styles.copyWrap}>
+            <input style={styles.input} readOnly value={referralLink} />
+            <button style={styles.button} onClick={() => copyToClipboard(referralLink)}>
+              Copy
+            </button>
           </div>
         </div>
       </div>
-    )
-  }
+    </div>
+  )
+
+  const renderSurprise = () => (
+    <div style={styles.grid}>
+      <div style={styles.card}>
+        <h3 style={styles.cardTitle}>Total Coin Balance</h3>
+        <div style={styles.balance}>{coinBalance}</div>
+        <button style={styles.buttonGhost} disabled>
+          Withdraw (Coming Soon)
+        </button>
+      </div>
+
+      <div style={styles.card}>
+        <h3 style={styles.cardTitle}>Mining</h3>
+        <div style={styles.small}>
+          Buy a miner with USDT (min 5 USDT). Points will be derived from on‑chain events.
+        </div>
+        <div style={{ ...styles.row, marginTop: 6 }}>
+          <input
+            style={styles.input}
+            type="number"
+            min={0}
+            step="0.1"
+            placeholder="Enter amount in USDT (min 5)"
+            value={miningAmount}
+            onChange={(e) => setMiningAmount(e.target.value)}
+          />
+          <button
+            className="buy-miner"
+            style={styles.button}
+            disabled={!canBuy || isProcessing}
+            onClick={handleBuyMiner}
+          >
+            Approve & Buy Miner
+          </button>
+        </div>
+        <div style={{ ...styles.small, marginTop: 6 }}>
+          Your Mining Stats: Miners <strong>{miningStats?.count ?? 0}</strong> • Total Deposited{' '}
+          <strong>${safeMoney(miningStats?.totalDeposited)}</strong>
+        </div>
+      </div>
+
+      <div style={styles.card}>
+        <h3 style={styles.cardTitle}>Your Stats</h3>
+        <div style={styles.statRow}>
+          <div style={styles.statBox}>
+            <div style={styles.statLabel}>Total Refer (L1)</div>
+            <div style={styles.statValue}>
+              {isRefsLoading ? '...' : referralList.length}
+            </div>
+          </div>
+        </div>
+        <div style={{ ...styles.row, marginTop: 8 }}>
+          <button
+            style={styles.button}
+            disabled={isProcessing || !account}
+            onClick={handleMarkTodayLogin}
+          >
+            Mark Today’s Login
+          </button>
+        </div>
+        {!!onChainData && (
+          <>
+            <div style={styles.divider} />
+            <div style={styles.small}>
+              Registration fee (on‑chain): <strong>${safeMoney(onChainData.registrationFee)}</strong>
+            </div>
+            <div style={{ ...styles.small, marginTop: 4 }}>
+              Commission percentages — L1: 40% • L2: 20% • L3: 10% (estimated on‑chain)
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
 
   return (
     <div style={styles.page}>
-      {renderSignModal()}
-
       <div style={styles.container}>
         <div style={styles.topBar}>
           <div style={styles.brand}>Web3 Community</div>
@@ -657,432 +401,27 @@ const Dashboard: React.FC = () => {
           </div>
         </div>
 
-        <div style={styles.grid}>
-          <div style={styles.card}>
-            <h3 style={styles.cardTitle}>Available Balance</h3>
-            {isOnChainLoading ? (
-              <div style={{ height: 26, background: '#eef2f6', borderRadius: 8 }} />
-            ) : (
-              <div style={styles.balance}>${safeMoney(onChainData?.userBalance)}</div>
-            )}
-            <div style={styles.row}>
-              <button
-                style={styles.button}
-                disabled={isProcessing || isOnChainLoading}
-                onClick={onChainData?.role === 'user' ? handleUserPayout : handleAdminPayout}
-              >
-                {onChainData?.role === 'user' ? 'Payout' : 'Withdraw Commission'}
-              </button>
-            </div>
-
-            <div style={styles.divider} />
-
-            <div style={{ ...styles.small, marginTop: 6 }}>
-              Total Coin Balance:{' '}
-              <strong>{isStatsLoading ? '...' : stats?.coin_balance ?? 0}</strong>
-            </div>
-            <div style={{ ...styles.small, marginTop: 4 }}>
-              Daily Login adds 1 coin. Referral adds 5 coins (off‑chain).
-            </div>
-            <button style={{ ...styles.buttonGhost, marginTop: 8 }} disabled={true}>
-              Payout (Coming Soon)
-            </button>
-
-            {onChainData?.role !== 'user' && (
-              <div style={{ marginTop: 6, ...styles.small }}>
-                Contract: <strong>${safeMoney(onChainData?.contractBalance)}</strong> • Your
-                Commission: <strong>${safeMoney(onChainData?.adminCommission)}</strong>
-              </div>
-            )}
-            {onChainData?.role === 'owner' && (
-              <div style={{ marginTop: 6 }}>
-                <button
-                  style={styles.buttonDanger}
-                  disabled={isProcessing}
-                  onClick={handleEmergencyWithdraw}
-                >
-                  Emergency Withdraw All
-                </button>
-              </div>
-            )}
-            {!isOnChainLoading && !onChainData?.hasFundCode && (
-              <div style={{ ...styles.small, color: colors.danger, marginTop: 4 }}>
-                Fund code not set. You must register with a fund code to withdraw.
-              </div>
-            )}
-          </div>
-
-          <div style={styles.card}>
-            <h3 style={styles.cardTitle}>Notice Board</h3>
-            <div style={styles.noticeScroller}>
-              {(notices ?? []).map((n) => (
-                <div
-                  key={n.id}
-                  style={styles.noticeCard}
-                  onClick={() => {
-                    if (n.link_url) window.open(n.link_url, '_blank')
-                  }}
-                  title={n.title}
-                >
-                  {n.image_url ? (
-                    <img src={n.image_url} alt={n.title} style={styles.noticeImg as any} />
-                  ) : (
-                    <div style={styles.noticeImg as any} />
-                  )}
-                  <div style={{ fontWeight: 900, marginBottom: 4 }}>{n.title}</div>
-                  <div style={{ ...styles.small, ...styles.muted, marginBottom: 6 }}>
-                    {new Date(n.created_at).toLocaleString()}
-                  </div>
-                  <div style={{ fontSize: 13, color: colors.navySoft, maxHeight: 120, overflow: 'auto' }}>
-                    <DangerousHtml html={n.content_html} />
-                  </div>
-                </div>
-              ))}
-              {(notices || []).length === 0 && (
-                <div style={{ ...styles.small, ...styles.muted }}>No notices yet.</div>
-              )}
-            </div>
-          </div>
-
-          <div style={styles.card}>
-            <h3 style={styles.cardTitle}>Mining</h3>
-            <div style={styles.small}>
-              Buy a miner with USDT (min 5 USDT). Points will be derived from on‑chain events.
-            </div>
-            <div style={{ ...styles.row, marginTop: 6 }}>
-              <input
-                style={styles.input}
-                type="number"
-                min={0}
-                step="0.1"
-                placeholder="Enter amount in USDT (min 5)"
-                value={miningAmount}
-                onChange={(e) => setMiningAmount(e.target.value)}
-              />
-              <button
-                className="buy-miner"
-                style={styles.button}
-                disabled={!canBuy || isProcessing}
-                onClick={handleBuyMiner}
-              >
-                Approve & Buy Miner
-              </button>
-            </div>
-            <div style={{ ...styles.small, marginTop: 6 }}>
-              Your Mining Stats: Miners <strong>{miningStats?.count ?? 0}</strong> • Total Deposited{' '}
-              <strong>${safeMoney(miningStats?.totalDeposited)}</strong>
-            </div>
-          </div>
-
-          <div style={styles.card}>
-            <h3 style={styles.cardTitle}>Your Stats</h3>
-            <div style={styles.statRow}>
-              <div style={styles.statBox}>
-                <div style={styles.statLabel}>Total Refer (L1)</div>
-                <div style={styles.statValue}>
-                  {isRefsLoading ? '...' : referralList.length}
-                </div>
-              </div>
-              <div style={styles.statBox}>
-                <div style={styles.statLabel}>Total Login (days)</div>
-                <div style={styles.statValue}>
-                  {isStatsLoading ? '...' : stats?.logins?.total_login_days ?? 0}
-                </div>
-              </div>
-            </div>
-            <div style={{ ...styles.row, marginTop: 8 }}>
-              <button
-                style={styles.button}
-                disabled={isProcessing || !account}
-                onClick={handleMarkTodayLogin}
-              >
-                Mark Today’s Login
-              </button>
-            </div>
-            {!!onChainData && (
-              <>
-                <div style={styles.divider} />
-                <div style={styles.small}>
-                  Registration fee (on‑chain): <strong>${safeMoney(onChainData.registrationFee)}</strong>
-                </div>
-                <div style={{ ...styles.small, marginTop: 4 }}>
-                  Commission percentages — L1: 40% • L2: 20% • L3: 10% (estimated on‑chain)
-                </div>
-              </>
-            )}
-          </div>
-
-          <div style={styles.card}>
-            <h3 style={styles.cardTitle}>Share & Earn</h3>
-            <div style={{ marginBottom: 8 }}>
-              <div style={{ ...styles.small, marginBottom: 4 }}>Referral Code</div>
-              <div style={styles.copyWrap}>
-                <input style={styles.input} readOnly value={referralCode || ''} />
-                <button style={styles.button} onClick={() => copyToClipboard(referralCode)}>
-                  Copy
-                </button>
-              </div>
-            </div>
-            <div>
-              <div style={{ ...styles.small, marginBottom: 4 }}>Referral Link</div>
-              <div style={styles.copyWrap}>
-                <input style={styles.input} readOnly value={referralLink} />
-                <button style={styles.button} onClick={() => copyToClipboard(referralLink)}>
-                  Copy
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {(onChainData?.role === 'admin' || onChainData?.role === 'owner') && <AdminPanel />}
+        {/* Icon-only navigation */}
+        <div style={styles.navRow}>
+          <button
+            style={{ ...styles.navBtn, ...(activeTab === 'home' ? styles.navBtnActive : {}) }}
+            onClick={() => setActiveTab('home')}
+            title="Home"
+            aria-label="Home"
+          >
+            <span style={styles.navIcon}>🏠</span>
+          </button>
+          <button
+            style={{ ...styles.navBtn, ...(activeTab === 'surprise' ? styles.navBtnActive : {}) }}
+            onClick={() => setActiveTab('surprise')}
+            title="Surprise"
+            aria-label="Surprise"
+          >
+            <span style={styles.navIcon}>🎁</span>
+          </button>
         </div>
-      </div>
-    </div>
-  )
-}
 
-// ----------------- Admin Panel with Image/Text/Script options -----------------
-const AdminPanel: React.FC = () => {
-  const { account } = useWallet()
-  const queryClient = useQueryClient()
-  const [isProcessing, setIsProcessing] = useState(false)
-
-  type NoticeType = 'image' | 'text' | 'script'
-  const [noticeType, setNoticeType] = useState<NoticeType>('image')
-
-  const [title, setTitle] = useState('')
-  const [priority, setPriority] = useState<number>(0)
-  const [isActive, setIsActive] = useState<boolean>(true)
-
-  // Image fields
-  const [imageUrl, setImageUrl] = useState('')
-  const [linkUrl, setLinkUrl] = useState('')
-  const [imagePreview, setImagePreview] = useState<string>('')
-
-  // Text/script fields
-  const [textContent, setTextContent] = useState('')
-  const [scriptContent, setScriptContent] = useState('')
-
-  const signAdminAction = async (purpose: string, address: string) => {
-    const provider = new BrowserProvider((window as any).ethereum)
-    const signer = await provider.getSigner()
-    const ts = Math.floor(Date.now() / 1000)
-    const message = `Admin action authorization
-Purpose: ${purpose}
-Address: ${ethers.getAddress(address)}
-Timestamp: ${ts}`
-    const signature = await signer.signMessage(message)
-    return { timestamp: ts, signature }
-  }
-
-  const readFileAsDataURL = (file: File): Promise<string> =>
-    new Promise((resolve, reject) => {
-      const fr = new FileReader()
-      fr.onload = () => resolve(String(fr.result || ''))
-      fr.onerror = reject
-      fr.readAsDataURL(file)
-    })
-
-  const onPickImage = async (file?: File | null) => {
-    if (!file) return
-    try {
-      const dataUrl = await readFileAsDataURL(file)
-      setImagePreview(dataUrl)
-      setImageUrl(dataUrl)
-    } catch (e) {
-      showErrorToast(e, 'Failed to load image')
-    }
-  }
-
-  const wrapScriptIfNeeded = (code: string) => {
-    const trimmed = code.trim()
-    if (!trimmed) return ''
-    if (trimmed.toLowerCase().includes('<script')) return trimmed
-    return `<script>\n${trimmed}\n</script>`
-  }
-
-  const postNotice = async () => {
-    if (!account) return
-
-    let payload: any = {
-      address: account,
-      title: title.trim(),
-      is_active: isActive,
-      priority,
-      kind: noticeType,
-    }
-
-    if (noticeType === 'image') {
-      if (!imageUrl) {
-        showErrorToast('Please provide an image (upload or URL)')
-        return
-      }
-      payload.image_url = imageUrl
-      payload.link_url = linkUrl || ''
-      payload.content_html = ''
-    } else if (noticeType === 'text') {
-      if (!textContent.trim()) {
-        showErrorToast('Please write some text')
-        return
-      }
-      payload.image_url = ''
-      payload.link_url = ''
-      payload.content_html = textContent
-    } else {
-      if (!scriptContent.trim()) {
-        showErrorToast('Please add script content')
-        return
-      }
-      payload.image_url = ''
-      payload.link_url = ''
-      payload.content_html = wrapScriptIfNeeded(scriptContent)
-    }
-
-    setIsProcessing(true)
-    try {
-      const { timestamp, signature } = await signAdminAction('create_notice', account)
-      const { createNotice } = await import('../services/api')
-      await createNotice({ ...payload, timestamp, signature })
-      showSuccessToast('Notice posted')
-
-      queryClient.invalidateQueries({ queryKey: ['notices'] })
-
-      // reset form
-      setTitle('')
-      setPriority(0)
-      setIsActive(true)
-      setImageUrl('')
-      setLinkUrl('')
-      setImagePreview('')
-      setTextContent('')
-      setScriptContent('')
-    } catch (e) {
-      showErrorToast(e, 'Failed to post notice')
-    } finally {
-      setIsProcessing(false)
-    }
-  }
-
-  return (
-    <div style={styles.card}>
-      <h3 style={styles.cardTitle}>Admin Panel</h3>
-
-      <div style={styles.tabRow as any}>
-        <button
-          style={{ ...styles.tabBtn, ...(noticeType === 'image' ? styles.tabBtnActive : {}) }}
-          onClick={() => setNoticeType('image')}
-        >
-          Image
-        </button>
-        <button
-          style={{ ...styles.tabBtn, ...(noticeType === 'text' ? styles.tabBtnActive : {}) }}
-          onClick={() => setNoticeType('text')}
-        >
-          Text
-        </button>
-        <button
-          style={{ ...styles.tabBtn, ...(noticeType === 'script' ? styles.tabBtnActive : {}) }}
-          onClick={() => setNoticeType('script')}
-        >
-          Script
-        </button>
-      </div>
-
-      <div style={{ ...styles.row, marginTop: 8 }}>
-        <div>
-          <div style={{ ...styles.small, marginBottom: 4 }}>Title</div>
-          <input
-            style={styles.input}
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="Enter title"
-          />
-        </div>
-        <div>
-          <div style={{ ...styles.small, marginBottom: 4 }}>Priority</div>
-          <input
-            type="number"
-            style={styles.input}
-            value={priority}
-            onChange={(e) => setPriority(Number(e.target.value) || 0)}
-            placeholder="0"
-          />
-        </div>
-      </div>
-
-      {noticeType === 'image' && (
-        <>
-          <div style={styles.row}>
-            <div>
-              <div style={{ ...styles.small, marginBottom: 4 }}>Upload from gallery</div>
-              <input type="file" accept="image/*" onChange={(e) => onPickImage(e.target.files?.[0] || null)} />
-              {imagePreview && (
-                <div style={{ marginTop: 8 }}>
-                  <img src={imagePreview} alt="preview" style={styles.previewImg as any} />
-                </div>
-              )}
-            </div>
-            <div>
-              <div style={{ ...styles.small, marginBottom: 4 }}>Or Image URL</div>
-              <input
-                style={styles.input}
-                value={imageUrl}
-                onChange={(e) => setImageUrl(e.target.value)}
-                placeholder="https://..."
-              />
-            </div>
-          </div>
-
-          <div style={{ marginTop: 6 }}>
-            <div style={{ ...styles.small, marginBottom: 4 }}>Link URL (optional)</div>
-            <input
-              style={styles.input}
-              value={linkUrl}
-              onChange={(e) => setLinkUrl(e.target.value)}
-              placeholder="https://... (opens on image click)"
-            />
-          </div>
-        </>
-      )}
-
-      {noticeType === 'text' && (
-        <div style={{ marginTop: 6 }}>
-          <div style={{ ...styles.small, marginBottom: 4 }}>Text content (plain text or simple HTML)</div>
-          <textarea
-            style={styles.textarea as any}
-            value={textContent}
-            onChange={(e) => setTextContent(e.target.value)}
-            placeholder="<p>Your message here</p>"
-          />
-        </div>
-      )}
-
-      {noticeType === 'script' && (
-        <div style={{ marginTop: 6 }}>
-          <div style={{ ...styles.small, marginBottom: 4 }}>
-            Script content (you can paste raw JS; we’ll auto wrap with &lt;script&gt; if missing)
-          </div>
-          <textarea
-            style={styles.textarea as any}
-            value={scriptContent}
-            onChange={(e) => setScriptContent(e.target.value)}
-            placeholder={`console.log('Hello from notice script');`}
-          />
-        </div>
-      )}
-
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
-          <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} />
-          Active
-        </label>
-        <button style={styles.button} onClick={postNotice} disabled={isProcessing}>
-          Post Notice
-        </button>
-      </div>
-
-      <div style={{ ...styles.small, ...styles.muted, marginTop: 6 }}>
-        Note: For production, consider using a CDN (Cloudflare Images/R2) for images.
+        {activeTab === 'home' ? renderHome() : renderSurprise()}
       </div>
     </div>
   )
