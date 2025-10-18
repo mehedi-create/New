@@ -1,5 +1,5 @@
 // frontend/src/pages/Dashboard.tsx
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useWallet } from '../context/WalletContext'
 import {
@@ -56,18 +56,58 @@ const styles: Record<string, React.CSSProperties & Record<string, any>> = {
     flexWrap: 'wrap',
   },
   brand: { fontWeight: 900, fontSize: 18, letterSpacing: 0.3 },
-  userBox: { display: 'flex', alignItems: 'center', gap: 8 },
-  avatar: {
-    width: 34, height: 34, borderRadius: '50%',
-    background: 'rgba(11,27,59,0.12)', display: 'grid', placeItems: 'center', fontWeight: 800,
+
+  // New user menu styles
+  userMenuWrap: {
+    position: 'relative',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
   },
-  logoutBtn: {
-    height: 36, padding: '0 12px', borderRadius: 10,
-    border: '1px solid rgba(11,27,59,0.15)', background: 'rgba(255,255,255,0.7)',
-    cursor: 'pointer', fontWeight: 700,
+  userIdText: {
+    fontWeight: 800,
+    fontSize: 13,
+    maxWidth: 160,
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+  },
+  userMenuBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: '50%',
+    border: '1px solid rgba(11,27,59,0.15)',
+    background: 'rgba(255,255,255,0.9)',
+    cursor: 'pointer',
+    display: 'grid',
+    placeItems: 'center',
+    fontSize: 16,
+  },
+  dropdown: {
+    position: 'absolute',
+    right: 0,
+    top: 40,
+    background: '#fff',
+    border: `1px solid ${colors.grayLine}`,
+    borderRadius: 10,
+    boxShadow: '0 10px 20px rgba(11,27,59,0.12)',
+    padding: 6,
+    minWidth: 140,
+    zIndex: 100,
+  },
+  dropdownItem: {
+    width: '100%',
+    textAlign: 'left' as const,
+    padding: '8px 10px',
+    borderRadius: 8,
+    border: 'none',
+    background: 'transparent',
+    cursor: 'pointer',
+    fontWeight: 700,
+    color: colors.deepNavy,
   },
 
-  // Icon-only top navigation
+  // Nav
   navRow: {
     display: 'grid',
     gridTemplateColumns: 'repeat(2, 1fr)',
@@ -124,6 +164,10 @@ const Dashboard: React.FC = () => {
   const [isProcessing, setIsProcessing] = useState(false)
   const [activeTab, setActiveTab] = useState<'home' | 'surprise'>('home')
 
+  // NEW: dropdown menu state + refs
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement | null>(null)
+
   // Prevent copy/select/context menu
   useEffect(() => {
     const prevent = (e: Event) => e.preventDefault()
@@ -139,7 +183,24 @@ const Dashboard: React.FC = () => {
     }
   }, [])
 
-  // On-chain data (direct reads) — user only
+  // Close menu on outside click or ESC
+  useEffect(() => {
+    const onDocClick = (e: MouseEvent) => {
+      if (!menuRef.current) return
+      if (!menuRef.current.contains(e.target as Node)) setMenuOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onDocClick)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDocClick)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [])
+
+  // On-chain data (direct reads)
   const { data: onChainData, isLoading: isOnChainLoading } = useQuery<OnChainData | null>({
     queryKey: ['onChainData', account],
     enabled: isValidAddress(account),
@@ -156,7 +217,7 @@ const Dashboard: React.FC = () => {
     },
   })
 
-  // L1 referrals from chain (userId list)
+  // L1 referrals from chain
   const { data: referralList = [], isLoading: isRefsLoading } = useQuery<string[]>({
     queryKey: ['referralsL1', account],
     enabled: isValidAddress(account),
@@ -178,7 +239,7 @@ const Dashboard: React.FC = () => {
     },
   })
 
-  // Off-chain stats (lite) for coin balance + login days
+  // Off-chain stats (coin balance + login days)
   const {
     data: stats,
     isLoading: isStatsLoading,
@@ -203,11 +264,14 @@ const Dashboard: React.FC = () => {
   })
 
   const referralCode = useMemo(() => (userId || '').toUpperCase(), [userId])
+  const displayUserId = useMemo(
+    () => (userId || stats?.userId || 'USER').toUpperCase(),
+    [userId, stats?.userId]
+  )
   const referralLink = useMemo(
     () => `${window.location.origin}/register?ref=${referralCode}`,
     [referralCode]
   )
-  const initials = (referralCode || 'U').slice(0, 2).toUpperCase()
 
   const safeMoney = (val?: string) => {
     const n = parseFloat(val || '0')
@@ -249,7 +313,6 @@ const Dashboard: React.FC = () => {
       const { timestamp, signature } = await signAuthMessage(account!)
       await markLogin(account!, timestamp, signature)
       showSuccessToast('Login counted for today')
-      // Refresh coin balance and login days right after marking login
       await refetchStatsLite()
     } catch (e) {
       showErrorToast(e, 'Unable to mark login')
@@ -421,16 +484,34 @@ const Dashboard: React.FC = () => {
       <div style={styles.container}>
         <div style={styles.topBar}>
           <div style={styles.brand}>Web3 Community</div>
-          <div style={styles.userBox}>
-            <div style={styles.avatar}>{initials}</div>
+
+          {/* New: userId + user icon with dropdown */}
+          <div style={styles.userMenuWrap} ref={menuRef}>
+            <span style={styles.userIdText} title={displayUserId}>{displayUserId}</span>
             <button
-              style={styles.logoutBtn}
-              onClick={() => {
-                disconnect()
-              }}
+              style={styles.userMenuBtn}
+              onClick={() => setMenuOpen((v) => !v)}
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              aria-label="User menu"
+              title="User menu"
             >
-              Logout
+              👤
             </button>
+            {menuOpen && (
+              <div style={styles.dropdown} role="menu">
+                <button
+                  style={styles.dropdownItem}
+                  onClick={() => {
+                    setMenuOpen(false)
+                    disconnect()
+                  }}
+                  role="menuitem"
+                >
+                  Logout
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
