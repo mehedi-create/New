@@ -18,10 +18,7 @@ const colors = {
 
 type Style = React.CSSProperties
 const styles: Record<string, Style> = {
-  page: {
-    minHeight: '100vh', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center',
-    userSelect: 'none', padding: '24px 12px', color: colors.text,
-  },
+  page: { minHeight: '100vh', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', userSelect: 'none', padding: '24px 12px', color: colors.text },
   wrap: { width: '100%', maxWidth: 1100 },
   header: { marginBottom: 12, textAlign: 'center' },
   brand: { fontWeight: 900, fontSize: '1.8rem', letterSpacing: 1 },
@@ -34,8 +31,8 @@ const styles: Record<string, Style> = {
   inputGroup: { display: 'flex', flexDirection: 'column', gap: 6 },
   label: { fontWeight: 700, fontSize: '0.95rem', color: colors.text },
   input: {
-    height: 46, borderRadius: 12, border: '2px solid rgba(20,184,166,0.3)', padding: '0 12px', fontSize: '1rem',
-    outline: 'none', color: colors.text, background: 'rgba(255,255,255,0.05)',
+    height: 46, borderRadius: 12, border: '2px solid rgba(20,184,166,0.3)',
+    padding: '0 12px', fontSize: '1rem', outline: 'none', color: colors.text, background: 'rgba(255,255,255,0.05)',
   },
   inputLocked: { background: 'rgba(255,255,255,0.08)', cursor: 'not-allowed' },
   hint: { fontSize: 12, color: colors.textMuted },
@@ -71,7 +68,6 @@ const styles: Record<string, Style> = {
   smallNote: { marginTop: 6, fontSize: 12, color: colors.textMuted },
 }
 
-// Spinner keyframes
 const injectSpinnerKeyframes = () => {
   const id = 'kf-spin'
   if (document.getElementById(id)) return
@@ -83,7 +79,6 @@ const injectSpinnerKeyframes = () => {
 
 const EXACT_LEN = 6
 
-// Surface wrapper for global theme
 const Surface: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <div className="lxr-surface">
     <div className="lxr-surface-lines" />
@@ -112,22 +107,16 @@ const Register: React.FC = () => {
   useEffect(() => { injectSpinnerKeyframes() }, [])
 
   useEffect(() => {
-    // Load latest fee from chain
     ;(async () => {
       try { const f = await getRegistrationFee(); if (Number(f) > 0) setFee(f) } catch {}
     })()
   }, [])
 
-  // Prefill ref from URL
   useEffect(() => {
     const ref = (searchParams.get('ref') || '').toUpperCase().trim()
-    if (ref) {
-      setReferralCode(ref)
-      if (ref.length === EXACT_LEN) setReferralLocked(true)
-    }
+    if (ref) { setReferralCode(ref); if (ref.length === EXACT_LEN) setReferralLocked(true) }
   }, [searchParams])
 
-  // Optional: block copy/select/context menu
   useEffect(() => {
     const prevent = (e: Event) => e.preventDefault()
     document.addEventListener('copy', prevent); document.addEventListener('cut', prevent)
@@ -138,7 +127,6 @@ const Register: React.FC = () => {
     }
   }, [])
 
-  // Validate
   useEffect(() => {
     const valid =
       userId.trim().length === EXACT_LEN &&
@@ -194,19 +182,14 @@ const Register: React.FC = () => {
         </header>
 
         <div style={styles.grid}>
-          {/* Form */}
           <section>
             <Surface>
               <h2 style={styles.sectionTitle}>Registration form</h2>
               <div style={styles.formRow}>
                 <div style={styles.inputGroup}>
                   <label htmlFor="userId" style={styles.label}>Your User ID (exactly {EXACT_LEN} characters)</label>
-                  <input
-                    id="userId" type="text" value={userId} maxLength={EXACT_LEN}
-                    onChange={(e) => setUserId(e.target.value.toUpperCase())}
-                    placeholder="e.g., MYID12" style={styles.input} disabled={isProcessing}
-                  />
-                  <span style={styles.hint}>Use uppercase letters/numbers. This must be exactly {EXACT_LEN}.</span>
+                  <input id="userId" type="text" value={userId} maxLength={EXACT_LEN} onChange={(e) => setUserId(e.target.value.toUpperCase())} placeholder="e.g., MYID12" style={styles.input} disabled={isProcessing} />
+                  <span style={styles.hint}>Use uppercase letters/numbers. This must be exactly {EXACT_LEN} to match the smart contract.</span>
                 </div>
 
                 <div style={styles.inputGroup}>
@@ -225,22 +208,14 @@ const Register: React.FC = () => {
 
                 <div style={styles.inputGroup}>
                   <label htmlFor="fundCode" style={styles.label}>Fund Code (min 4 chars)</label>
-                  <input
-                    id="fundCode" type="password" value={fundCode}
-                    onChange={(e) => setFundCode(e.target.value)}
-                    placeholder="Enter a secret code" style={styles.input} disabled={isProcessing}
-                  />
+                  <input id="fundCode" type="password" value={fundCode} onChange={(e) => setFundCode(e.target.value)} placeholder="Enter a secret code" style={styles.input} disabled={isProcessing} />
                   <span style={styles.dangerText}>WARNING: This code is required for withdrawals. If you lose it, it cannot be recovered by anyone.</span>
                   <span style={styles.hint}>Write it down and store it safely. Do not share with anyone.</span>
                 </div>
 
                 <div style={styles.inputGroup}>
                   <label htmlFor="confirmFundCode" style={styles.label}>Confirm Fund Code</label>
-                  <input
-                    id="confirmFundCode" type="password" value={confirmFundCode}
-                    onChange={(e) => setConfirmFundCode(e.target.value)}
-                    placeholder="Re‑enter your secret code" style={styles.input} disabled={isProcessing}
-                  />
+                  <input id="confirmFundCode" type="password" value={confirmFundCode} onChange={(e) => setConfirmFundCode(e.target.value)} placeholder="Re‑enter your secret code" style={styles.input} disabled={isProcessing} />
                 </div>
 
                 <button
@@ -255,12 +230,12 @@ const Register: React.FC = () => {
             </Surface>
           </section>
 
-          {/* Fee explanation */}
           <section>
             <Surface>
               <h2 style={styles.sectionTitle}>Why the {fee} USDT fee?</h2>
               <p style={styles.hint}>
                 To keep our decentralized community healthy and spam‑free, we require a small, one‑time registration fee of <strong style={{ color: colors.text }}>{fee} USDT</strong>.
+                This helps prevent bot signups, protects genuine members, and improves the overall quality of the network.
               </p>
               <div style={styles.feeBox}>
                 What you’ll need:
@@ -272,7 +247,7 @@ const Register: React.FC = () => {
                 </ul>
               </div>
               <p style={{ ...styles.smallNote, marginTop: 8 }}>
-                Note: IDs longer than {EXACT_LEN} are not supported by the current smart contract.
+                Note: IDs longer than {EXACT_LEN} are not supported by the current smart contract. If you need 6–8 later, we must deploy a new contract.
               </p>
             </Surface>
           </section>
