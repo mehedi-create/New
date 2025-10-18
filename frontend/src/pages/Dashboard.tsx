@@ -33,19 +33,19 @@ const colors = {
 
 const styles: Record<string, React.CSSProperties> = {
   page: { minHeight: '100vh', width: '100%' },
-  container: { maxWidth: 680, margin: '0 auto', padding: '16px 12px 96px' },
+  container: { maxWidth: 680, margin: '0 auto', padding: '16px 12px 96px' }, // bottom space for nav
   topBar: {
     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
     gap: 8, marginBottom: 12, flexWrap: 'wrap', color: colors.text,
   },
   brand: { fontWeight: 900, fontSize: 18, letterSpacing: 1 },
 
+  // user menu
   userMenuWrap: { position: 'relative', display: 'flex', alignItems: 'center', gap: 8 },
   userIdText: { fontWeight: 800, fontSize: 13, maxWidth: 160, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
   userMenuBtn: {
-    width: 34, height: 34, borderRadius: '50%',
-    border: `1px solid ${colors.grayLine}`, background: 'rgba(255,255,255,0.06)',
-    cursor: 'pointer', display: 'grid', placeItems: 'center', color: colors.text,
+    width: 34, height: 34, borderRadius: '50%', border: `1px solid ${colors.grayLine}`,
+    background: 'rgba(255,255,255,0.06)', cursor: 'pointer', display: 'grid', placeItems: 'center', color: colors.text,
   },
   dropdown: {
     position: 'absolute', right: 0, top: 40, background: 'rgba(15,31,63,0.98)',
@@ -68,7 +68,6 @@ const styles: Record<string, React.CSSProperties> = {
   copyWrap: { display: 'grid', gridTemplateColumns: '1fr', gap: 8, alignItems: 'center' },
   small: { fontSize: 12, color: colors.textMuted },
   balance: { fontSize: 26, fontWeight: 900, margin: '4px 0 6px' },
-  divider: { height: 1, background: colors.grayLine, margin: '6px 0' },
 
   button: {
     height: 44, borderRadius: 10,
@@ -81,6 +80,14 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 14, fontWeight: 800, cursor: 'pointer', padding: '0 12px', width: '100%',
   },
 
+  // small icon ghost btn
+  iconBtnGhost: {
+    height: 32, width: 32, borderRadius: 8,
+    background: 'rgba(255,255,255,0.06)', color: colors.text,
+    border: `1px solid ${colors.grayLine}`, display: 'grid', placeItems: 'center', cursor: 'pointer',
+  },
+
+  // bottom nav
   bottomNavWrap: { position: 'fixed', bottom: 12, left: '50%', transform: 'translateX(-50%)', width: '100%', maxWidth: 680, padding: '0 12px', zIndex: 200 },
   bottomNav: { display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 },
   navBtn: {
@@ -88,6 +95,13 @@ const styles: Record<string, React.CSSProperties> = {
     background: 'rgba(255,255,255,0.06)', fontWeight: 800, cursor: 'pointer', color: colors.text, display: 'grid', placeItems: 'center',
   },
   navBtnActive: { background: `linear-gradient(45deg, ${colors.accent}, ${colors.accentSoft})`, color: '#0b1b3b', borderColor: colors.accent },
+
+  // modal/overlay
+  overlay: {
+    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 999,
+    padding: 12,
+  },
 }
 
 const IconHome: React.FC<{ size?: number }> = ({ size = 20 }) => (
@@ -102,6 +116,9 @@ const IconSurpriseCoin: React.FC<{ size?: number }> = ({ size = 20 }) => (
 )
 const IconUser: React.FC<{ size?: number }> = ({ size = 18 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24"><path d="M12 12a5 5 0 1 0-5-5 5.006 5.006 0 0 0 5 5zm0 2c-5 0-9 2.5-9 5.5V22h18v-2.5C21 16.5 17 14 12 14z" fill="currentColor"/></svg>
+)
+const IconInfo: React.FC<{ size?: number }> = ({ size = 16 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 10 10A10.011 10.011 0 0 0 12 2zm0 4a1.25 1.25 0 1 1-1.25 1.25A1.25 1.25 0 0 1 12 6zm2 12h-4v-2h1v-4h-1V10h3v6h1z" fill="currentColor"/></svg>
 )
 
 const Surface: React.FC<{ children: React.ReactNode }> = ({ children }) => (
@@ -130,10 +147,13 @@ const Dashboard: React.FC = () => {
   const { account, userId, disconnect } = useWallet()
   const queryClient = useQueryClient()
 
+  // tabs
   const [activeTab, setActiveTabState] = useState<'home' | 'surprise'>(() => (getCookie('activeTab') === 'surprise' ? 'surprise' : 'home'))
   const setActiveTab = (t: 'home' | 'surprise') => { setActiveTabState(t); setCookie('activeTab', t, 365) }
+
   const [isProcessing, setIsProcessing] = useState(false)
 
+  // user menu
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
@@ -143,6 +163,7 @@ const Dashboard: React.FC = () => {
     return () => { document.removeEventListener('mousedown', onDocClick); document.removeEventListener('keydown', onKey) }
   }, [])
 
+  // on-chain
   const { data: onChainData, isLoading: isOnChainLoading } = useQuery<OnChainData | null>({
     queryKey: ['onChainData', account],
     enabled: isValidAddress(account),
@@ -167,6 +188,7 @@ const Dashboard: React.FC = () => {
     },
   })
 
+  // mining stats query (kept for invalidation)
   useQuery<{ count: number; totalDeposited: string }>({
     queryKey: ['miningStats', account],
     enabled: isValidAddress(account),
@@ -177,6 +199,7 @@ const Dashboard: React.FC = () => {
     },
   })
 
+  // off-chain lite stats
   const { data: stats, isLoading: isStatsLoading, refetch: refetchStatsLite } = useQuery<StatsResponse | null>({
     queryKey: ['stats-lite', account],
     enabled: isValidAddress(account),
@@ -197,12 +220,51 @@ const Dashboard: React.FC = () => {
   const copyToClipboard = (text: string) => { navigator.clipboard.writeText(text); showSuccessToast('Copied to clipboard') }
   const coinBalance = stats?.coin_balance ?? 0
 
-  const handleUserPayout = async () => {
-    if (!onChainData?.hasFundCode) { showErrorToast('Fund code not set. Please register with a fund code.'); return }
-    const code = window.prompt('Enter your secret Fund Code'); if (!code) return
+  // mining buy form
+  const [miningAmount, setMiningAmount] = useState<string>(() => getCookie('miningAmount') || '5.00')
+  useEffect(() => { setCookie('miningAmount', miningAmount || '', 30) }, [miningAmount])
+  const amountNum = Number(miningAmount || '0')
+  const isInvalidAmount = miningAmount !== '' && (isNaN(amountNum) || amountNum < 5)
+
+  // info modal for coins
+  const [showCoinInfo, setShowCoinInfo] = useState(false)
+
+  // fund code modal
+  const [showFundModal, setShowFundModal] = useState(false)
+  const [fundCode, setFundCode] = useState('')
+  const [fundErr, setFundErr] = useState<string>('')
+
+  // Handlers
+  const openFundModal = () => {
+    setFundErr('')
+    setFundCode('')
+    setShowFundModal(true)
+  }
+
+  const confirmWithdraw = async () => {
+    if (!fundCode) { setFundErr('Please enter your Fund Code'); return }
+    setFundErr('')
     setIsProcessing(true)
-    try { const tx = await withdrawWithFundCode(code); if ((tx as any)?.wait) await (tx as any).wait(); showSuccessToast('Payout successful!') }
-    catch (e) { showErrorToast(e, 'Payout failed') } finally { setIsProcessing(false) }
+    try {
+      const tx = await withdrawWithFundCode(fundCode)
+      if ((tx as any)?.wait) await (tx as any).wait()
+      setShowFundModal(false)
+      setFundCode('')
+      showSuccessToast('Payout successful!')
+    } catch (e) {
+      setFundErr(typeof (e as any)?.message === 'string' ? (e as any).message : 'Payout failed')
+      showErrorToast(e, 'Payout failed')
+    } finally {
+      setIsProcessing(false)
+    }
+  }
+
+  const handleUserPayout = () => {
+    if (!onChainData?.hasFundCode) {
+      showErrorToast('Fund code not set. Please register with a fund code.')
+      return
+    }
+    openFundModal()
   }
 
   const handleMarkTodayLogin = async () => {
@@ -216,11 +278,6 @@ const Dashboard: React.FC = () => {
     } catch (e) { showErrorToast(e, 'Unable to mark login') } finally { setIsProcessing(false) }
   }
 
-  const [miningAmount, setMiningAmount] = useState<string>(() => getCookie('miningAmount') || '5.00')
-  useEffect(() => { setCookie('miningAmount', miningAmount || '', 30) }, [miningAmount])
-  const amountNum = Number(miningAmount || '0')
-  const isInvalidAmount = miningAmount !== '' && (isNaN(amountNum) || amountNum < 5)
-
   const handleBuyMiner = async () => {
     if (!isValidAddress(account)) return
     if (isNaN(amountNum) || amountNum < 5) { showErrorToast('Minimum 5 USDT required.'); return }
@@ -233,6 +290,7 @@ const Dashboard: React.FC = () => {
     } catch (e) { showErrorToast(e, 'Failed to buy miner') } finally { setIsProcessing(false) }
   }
 
+  // Views
   const renderHome = () => (
     <div style={styles.grid}>
       <div style={styles.cardShell}>
@@ -244,18 +302,10 @@ const Dashboard: React.FC = () => {
             <div style={styles.balance}>${safeMoney(onChainData?.userBalance)}</div>
           )}
           <div style={styles.row}>
-            <button style={styles.button} disabled={isProcessing || isOnChainLoading} onClick={handleUserPayout}>Payout</button>
+            <button style={styles.button} disabled={isProcessing || isOnChainLoading} onClick={handleUserPayout}>
+              Payout
+            </button>
           </div>
-
-          <div style={styles.divider} />
-
-          <div style={{ ...styles.small, marginTop: 6 }}>
-            Total Coin Balance: <strong>{isStatsLoading ? '...' : coinBalance}</strong>
-          </div>
-          <div style={{ ...styles.small, marginTop: 4 }}>
-            Daily Login adds 1 coin. Referral adds 5 coins (off‑chain).
-          </div>
-          <button style={{ ...styles.buttonGhost, marginTop: 8 }} disabled>Payout (Coming Soon)</button>
 
           {!isOnChainLoading && !onChainData?.hasFundCode && (
             <div style={{ ...styles.small, color: colors.danger, marginTop: 8 }}>
@@ -287,17 +337,112 @@ const Dashboard: React.FC = () => {
     </div>
   )
 
+  const renderCoinInfoModal = () => {
+    if (!showCoinInfo) return null
+    return (
+      <div style={styles.overlay} onClick={() => setShowCoinInfo(false)}>
+        <div className="lxr-surface" style={{ maxWidth: 520, width: '100%' }} onClick={(e) => e.stopPropagation()}>
+          <div className="lxr-surface-lines" />
+          <div className="lxr-surface-mesh" />
+          <div className="lxr-surface-circuit" />
+          <div className="lxr-surface-holo" />
+          <div style={{ position: 'relative', zIndex: 2 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <div style={{ fontWeight: 900 }}>How to earn coins</div>
+              <button style={styles.iconBtnGhost} onClick={() => setShowCoinInfo(false)} aria-label="Close">
+                ✕
+              </button>
+            </div>
+
+            <div style={{ fontSize: 13, color: colors.textMuted, marginBottom: 8 }}>
+              Earn coins through daily activity, referrals, and mining:
+            </div>
+
+            <div style={{ border: `1px solid ${colors.grayLine}`, borderRadius: 12, overflow: 'hidden' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 120px', padding: '8px 10px', borderBottom: `1px solid ${colors.grayLine}`, fontWeight: 800 }}>
+                <div>Action</div>
+                <div style={{ textAlign: 'right' }}>Coins</div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 120px', padding: '8px 10px', borderBottom: `1px solid ${colors.grayLine}` }}>
+                <div>Daily login</div>
+                <div style={{ textAlign: 'right' }}>+1 coin/day</div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 120px', padding: '8px 10px', borderBottom: `1px solid ${colors.grayLine}` }}>
+                <div>Per referral</div>
+                <div style={{ textAlign: 'right' }}>+5 coins</div>
+              </div>
+              <div style={{ padding: '8px 10px' }}>
+                <div style={{ fontWeight: 800, marginBottom: 4 }}>Mining</div>
+                <div style={{ fontSize: 13, color: colors.textMuted }}>
+                  Earn coins daily equal to your invested USDT, for 30 days.
+                  <br />
+                  Example: invest $5 USDT → earn 5 coins/day × 30 days.
+                </div>
+              </div>
+            </div>
+
+            <div style={{ marginTop: 10, textAlign: 'right' }}>
+              <button style={styles.button} onClick={() => setShowCoinInfo(false)}>Got it</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  const renderFundModal = () => {
+    if (!showFundModal) return null
+    return (
+      <div style={styles.overlay} onClick={() => (!isProcessing ? setShowFundModal(false) : null)}>
+        <div className="lxr-surface" style={{ maxWidth: 420, width: '100%' }} onClick={(e) => e.stopPropagation()}>
+          <div className="lxr-surface-lines" />
+          <div className="lxr-surface-mesh" />
+          <div className="lxr-surface-circuit" />
+          <div className="lxr-surface-holo" />
+          <div style={{ position: 'relative', zIndex: 2 }}>
+            <div style={{ fontWeight: 900, marginBottom: 6 }}>Enter Fund Code</div>
+            <div style={{ fontSize: 13, color: colors.textMuted, marginBottom: 8 }}>
+              Your secret Fund Code is required to withdraw your on‑chain balance.
+            </div>
+            <input
+              type="password"
+              placeholder="••••"
+              value={fundCode}
+              onChange={(e) => setFundCode(e.target.value)}
+              style={{ ...styles.input, marginBottom: 8 }}
+              disabled={isProcessing}
+            />
+            {!!fundErr && <div style={{ color: colors.danger, fontSize: 12, fontWeight: 800, marginBottom: 8 }}>{fundErr}</div>}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="lxr-buy-btn" onClick={confirmWithdraw} disabled={isProcessing}>
+                {isProcessing ? 'PROCESSING...' : 'Withdraw'}
+              </button>
+              <button style={styles.buttonGhost} onClick={() => setShowFundModal(false)} disabled={isProcessing}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   const renderSurprise = () => (
     <div style={styles.grid}>
+      {/* Total coins with info button */}
       <div style={styles.cardShell}>
         <Surface>
-          <h3 style={styles.cardTitle}>Total Coin Balance</h3>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <h3 style={styles.cardTitle}>Total Coin Balance</h3>
+            <button style={styles.iconBtnGhost} onClick={() => setShowCoinInfo(true)} title="How to earn coins" aria-label="How to earn coins">
+              <IconInfo />
+            </button>
+          </div>
           <div style={styles.balance}>{isStatsLoading ? '...' : coinBalance}</div>
-          <button style={styles.buttonGhost} disabled>Withdraw (Coming Soon)</button>
         </Surface>
       </div>
 
-      {/* Mining area: only card (no extra heading/below text) */}
+      {/* Mining area: only card */}
       <div style={styles.cardShell}>
         <div className="lxr-mining-card">
           <div className="lxr-network-lines" />
@@ -305,6 +450,7 @@ const Dashboard: React.FC = () => {
           <div className="lxr-circuit" />
           <div className="lxr-holo" />
           <div style={{ position: 'relative', zIndex: 2 }}>
+            {/* Header */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
               <div>
                 <div className="lxr-lexori-logo" style={{ fontSize: 22, fontWeight: 900, letterSpacing: 1 }}>LEXORI</div>
@@ -313,6 +459,14 @@ const Dashboard: React.FC = () => {
               <div style={{ width: 42, height: 42, borderRadius: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(45deg, #14b8a6, #e8f9f1)', color: '#000', fontWeight: 800 }}>L</div>
             </div>
 
+            {/* Updated info line */}
+            <div style={{ textAlign: 'center', marginBottom: 12, fontSize: 13, fontWeight: 600, color: colors.accent }}>
+              Earn coins daily equal to your invested USDT, for 30 days.
+              <br />
+              Example: invest $5 USDT → 5 coins/day × 30 days.
+            </div>
+
+            {/* Purchase */}
             <div className="lxr-panel">
               <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
                 <div style={{ flex: 1 }}>
@@ -335,6 +489,7 @@ const Dashboard: React.FC = () => {
         </div>
       </div>
 
+      {/* Your stats */}
       <div style={styles.cardShell}>
         <Surface>
           <h3 style={styles.cardTitle}>Your Stats</h3>
@@ -360,7 +515,12 @@ const Dashboard: React.FC = () => {
 
   return (
     <div style={styles.page}>
+      {/* Modals */}
+      {renderCoinInfoModal()}
+      {renderFundModal()}
+
       <div style={styles.container}>
+        {/* Top bar */}
         <div style={styles.topBar}>
           <div className="lxr-lexori-logo" style={styles.brand as any}>Web3 Community</div>
           <div style={styles.userMenuWrap} ref={menuRef}>
@@ -380,6 +540,7 @@ const Dashboard: React.FC = () => {
 
         {activeTab === 'home' ? renderHome() : renderSurprise()}
 
+        {/* Bottom nav */}
         <div style={styles.bottomNavWrap}>
           <div className="lxr-surface" style={{ padding: 8, borderRadius: 14 }}>
             <div className="lxr-surface-lines" />
@@ -398,6 +559,7 @@ const Dashboard: React.FC = () => {
             </div>
           </div>
         </div>
+        {/* End bottom nav */}
       </div>
     </div>
   )
