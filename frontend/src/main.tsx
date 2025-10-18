@@ -29,15 +29,18 @@ const THEME_CSS = `
   --text:#e8f9f1; --muted:rgba(232,249,241,.75); --line:rgba(255,255,255,.12);
 }
 
-/* Layout base fix to avoid white gaps on scroll */
-html, body, #root { height: 100%; min-height: 100%; margin: 0; }
-body { overscroll-behavior-y: contain; background-color: var(--deep); }
+/* Base layout fix: prevent white gap on long scroll/overscroll */
+html, body { min-height: 100%; height: auto; margin: 0; background-color: var(--deep); overscroll-behavior-y: none; }
+#root { min-height: 100%; }
 
-.theme-lexori, .theme-lexori body, .theme-lexori #root {
+/* Fixed gradient layer behind everything */
+.theme-lexori::before{
+  content: ''; position: fixed; inset: 0; z-index: -1; pointer-events: none;
   background: linear-gradient(135deg, var(--deep) 0%, var(--soft) 30%, var(--deep) 70%, var(--soft) 100%);
-  background-attachment: fixed;
-  color: var(--text);
 }
+
+/* Text color base */
+.theme-lexori, .theme-lexori body, .theme-lexori #root { color: var(--text); }
 
 /* Brand gradient text */
 .lxr-lexori-logo{
