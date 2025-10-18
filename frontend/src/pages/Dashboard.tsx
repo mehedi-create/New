@@ -23,27 +23,43 @@ type OnChainData = {
   registrationFee: string
 }
 
+// Cookie helpers
+const setCookie = (name: string, value: string, days = 365) => {
+  const maxAge = days * 24 * 60 * 60
+  const secure = window.location.protocol === 'https:' ? '; Secure' : ''
+  document.cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)}; Path=/; Max-Age=${maxAge}; SameSite=Lax${secure}`
+}
+const getCookie = (name: string): string | null => {
+  const key = `${encodeURIComponent(name)}=`
+  const parts = document.cookie.split('; ')
+  for (const p of parts) {
+    if (p.startsWith(key)) return decodeURIComponent(p.substring(key.length))
+  }
+  return null
+}
+
 const colors = {
-  bgLightGreen: '#e8f9f1',
-  bgLightGreen2: '#e0f5ed',
+  // Dark Lexori theme
   deepNavy: '#0b1b3b',
   navySoft: '#163057',
   accent: '#14b8a6',
-  danger: '#b91c1c',
-  white: '#ffffff',
-  grayLine: 'rgba(11,27,59,0.10)',
+  accentSoft: '#e0f5ed',
+  text: '#e8f9f1',
+  textMuted: 'rgba(232,249,241,0.75)',
+  danger: '#ef4444',
+  grayLine: 'rgba(255,255,255,0.12)',
 }
 
 const styles: Record<string, React.CSSProperties & Record<string, any>> = {
   page: {
     minHeight: '100vh',
     width: '100%',
-    background: `linear-gradient(180deg, ${colors.bgLightGreen} 0%, ${colors.bgLightGreen2} 100%)`,
-    color: colors.deepNavy,
+    background: `linear-gradient(135deg, ${colors.deepNavy} 0%, ${colors.navySoft} 30%, ${colors.deepNavy} 70%, ${colors.navySoft} 100%)`,
+    color: colors.text,
     userSelect: 'none',
   },
   container: {
-    maxWidth: 640,
+    maxWidth: 680,
     margin: '0 auto',
     padding: '16px 12px 32px',
   },
@@ -55,9 +71,13 @@ const styles: Record<string, React.CSSProperties & Record<string, any>> = {
     marginBottom: 12,
     flexWrap: 'wrap',
   },
-  brand: { fontWeight: 900, fontSize: 18, letterSpacing: 0.3 },
+  brand: {
+    fontWeight: 900,
+    fontSize: 18,
+    letterSpacing: 1,
+  },
 
-  // New user menu styles
+  // User menu (id + icon + dropdown)
   userMenuWrap: {
     position: 'relative',
     display: 'flex',
@@ -71,29 +91,32 @@ const styles: Record<string, React.CSSProperties & Record<string, any>> = {
     whiteSpace: 'nowrap',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
+    color: colors.text,
   },
   userMenuBtn: {
     width: 34,
     height: 34,
     borderRadius: '50%',
-    border: '1px solid rgba(11,27,59,0.15)',
-    background: 'rgba(255,255,255,0.9)',
+    border: `1px solid ${colors.grayLine}`,
+    background: 'rgba(255,255,255,0.06)',
     cursor: 'pointer',
     display: 'grid',
     placeItems: 'center',
     fontSize: 16,
+    color: colors.text,
   },
   dropdown: {
     position: 'absolute',
     right: 0,
     top: 40,
-    background: '#fff',
+    background: 'rgba(15,31,63,0.98)',
     border: `1px solid ${colors.grayLine}`,
     borderRadius: 10,
-    boxShadow: '0 10px 20px rgba(11,27,59,0.12)',
+    boxShadow: '0 10px 24px rgba(0,0,0,0.35)',
     padding: 6,
     minWidth: 140,
     zIndex: 100,
+    backdropFilter: 'blur(8px)',
   },
   dropdownItem: {
     width: '100%',
@@ -103,8 +126,8 @@ const styles: Record<string, React.CSSProperties & Record<string, any>> = {
     border: 'none',
     background: 'transparent',
     cursor: 'pointer',
-    fontWeight: 700,
-    color: colors.deepNavy,
+    fontWeight: 800,
+    color: colors.text,
   },
 
   // Icon-only nav
@@ -118,211 +141,166 @@ const styles: Record<string, React.CSSProperties & Record<string, any>> = {
     height: 44,
     borderRadius: 10,
     border: `1px solid ${colors.grayLine}`,
-    background: 'rgba(255,255,255,0.85)',
+    background: 'rgba(255,255,255,0.06)',
     fontWeight: 800,
     cursor: 'pointer',
+    color: colors.text,
   },
-  navBtnActive: { background: colors.accent, color: '#fff', borderColor: colors.accent },
+  navBtnActive: {
+    background: `linear-gradient(45deg, ${colors.accent}, ${colors.accentSoft})`,
+    color: '#0b1b3b',
+    borderColor: colors.accent,
+  },
   navIcon: { fontSize: 18 },
 
   grid: { display: 'grid', gridTemplateColumns: '1fr', gap: 12, alignItems: 'stretch' },
+
+  // Card with Lexori surface theme
   card: {
-    background: 'rgba(255,255,255,0.7)', border: `1px solid ${colors.grayLine}`,
-    borderRadius: 14, padding: 14, minHeight: 140, boxShadow: '0 8px 18px rgba(11,27,59,0.06)',
-    display: 'flex', flexDirection: 'column', gap: 8,
+    color: colors.text,
+    background:
+      `radial-gradient(circle at 20% 20%, rgba(20,184,166,0.12) 0%, transparent 50%),
+       radial-gradient(circle at 80% 80%, rgba(232,249,241,0.08) 0%, transparent 50%),
+       radial-gradient(circle at 40% 60%, rgba(22,48,87,0.18) 0%, transparent 50%),
+       linear-gradient(135deg, ${colors.deepNavy} 0%, ${colors.navySoft} 30%, ${colors.deepNavy} 70%, ${colors.navySoft} 100%)`,
+    border: `1px solid rgba(20,184,166,0.25)`,
+    borderRadius: 16,
+    padding: 14,
+    minHeight: 140,
+    boxShadow:
+      '0 15px 30px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.08), inset 0 0 36px rgba(20,184,166,0.04)',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 8,
   },
   cardTitle: { margin: '0 0 6px 0', fontSize: 16, fontWeight: 900 },
   statRow: { display: 'grid', gridTemplateColumns: '1fr', gap: 8 },
   statBox: {
-    background: 'rgba(255,255,255,0.85)', border: `1px solid ${colors.grayLine}`,
-    borderRadius: 12, padding: 10, textAlign: 'center',
+    background: 'rgba(0,0,0,0.30)',
+    border: `1px solid ${colors.grayLine}`,
+    borderRadius: 12,
+    padding: 10,
+    textAlign: 'center',
   },
-  statLabel: { fontSize: 12, color: colors.navySoft },
-  statValue: { fontSize: 22, fontWeight: 900 },
-  balance: { fontSize: 26, fontWeight: 900, margin: '4px 0 6px' },
+  statLabel: { fontSize: 12, color: colors.textMuted },
+  statValue: { fontSize: 22, fontWeight: 900, color: colors.text },
+  balance: { fontSize: 26, fontWeight: 900, margin: '4px 0 6px', color: colors.text },
+
+  // Buttons (Primary / Ghost)
   button: {
-    height: 44, borderRadius: 10, background: colors.accent, color: colors.white, border: 'none',
-    fontSize: 14, fontWeight: 800, cursor: 'pointer', padding: '0 12px', width: '100%',
+    height: 44,
+    borderRadius: 10,
+    background: `linear-gradient(45deg, ${colors.accent}, ${colors.accentSoft})`,
+    color: '#0b1b3b',
+    border: 'none',
+    fontSize: 14,
+    fontWeight: 800,
+    cursor: 'pointer',
+    padding: '0 12px',
+    width: '100%',
+    boxShadow: '0 4px 15px rgba(20,184,166,0.3)',
   },
   buttonGhost: {
-    height: 44, borderRadius: 10, background: 'transparent', color: colors.deepNavy,
-    border: `1px solid ${colors.grayLine}`, fontSize: 14, fontWeight: 800, cursor: 'pointer',
+    height: 44,
+    borderRadius: 10,
+    background: 'rgba(255,255,255,0.06)',
+    color: colors.text,
+    border: `1px solid ${colors.grayLine}`,
+    fontSize: 14,
+    fontWeight: 800,
+    cursor: 'pointer',
+    padding: '0 12px',
+    width: '100%',
   },
+
   row: { display: 'grid', gridTemplateColumns: '1fr', gap: 8, width: '100%' },
+
+  // Inputs (dark)
   input: {
-    height: 40, borderRadius: 10, border: `1px solid ${colors.grayLine}`, padding: '0 10px',
-    background: colors.white, outline: 'none', color: colors.deepNavy, fontSize: 14, width: '100%',
+    height: 40,
+    borderRadius: 10,
+    border: '2px solid rgba(20,184,166,0.3)',
+    padding: '0 10px',
+    background: 'rgba(255,255,255,0.05)',
+    outline: 'none',
+    color: colors.text,
+    fontSize: 14,
+    width: '100%',
   },
+
   copyWrap: { display: 'grid', gridTemplateColumns: '1fr', gap: 8, alignItems: 'center' },
-  small: { fontSize: 12, color: colors.navySoft },
+  small: { fontSize: 12, color: colors.textMuted },
   divider: { height: 1, background: colors.grayLine, margin: '6px 0' },
 }
 
 // Lexori Mining Card CSS (scoped)
 const lexoriCSS = `
 .lxr-mining-card {
-  color: #fff;
-  position: relative;
-  overflow: hidden;
-  border-radius: 16px;
-  padding: 16px;
-  width: 100%;
-  max-width: 380px;
-  aspect-ratio: 1.586;
-  margin: 0 auto;
+  color: #fff; position: relative; overflow: hidden;
+  border-radius: 16px; padding: 16px; width: 100%; max-width: 380px;
+  aspect-ratio: 1.586; margin: 0 auto;
   background:
     radial-gradient(circle at 20% 20%, rgba(20,184,166,0.15) 0%, transparent 50%),
     radial-gradient(circle at 80% 80%, rgba(232,249,241,0.1) 0%, transparent 50%),
     radial-gradient(circle at 40% 60%, rgba(22,48,87,0.2) 0%, transparent 50%),
     linear-gradient(135deg, #0b1b3b 0%, #163057 30%, #0b1b3b 70%, #163057 100%);
-  box-shadow:
-    0 15px 30px rgba(0,0,0,0.6),
-    inset 0 1px 0 rgba(255,255,255,0.1),
-    inset 0 0 50px rgba(20,184,166,0.05);
-  transition: all 0.4s ease;
-  border: 1px solid rgba(20,184,166,0.2);
+  box-shadow: 0 15px 30px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.1), inset 0 0 50px rgba(20,184,166,0.05);
+  transition: all .4s ease; border: 1px solid rgba(20,184,166,0.2);
 }
-.lxr-mining-card:hover {
-  transform: translateY(-6px);
-  box-shadow:
-    0 30px 60px rgba(0,0,0,0.5),
-    inset 0 1px 0 rgba(255,255,255,0.2);
-}
-.lxr-network-lines, .lxr-crypto-mesh, .lxr-circuit {
-  position: absolute; inset: 0; pointer-events: none;
-}
-.lxr-network-lines {
-  opacity: .15;
-  background-image:
-    radial-gradient(circle at 20% 30%, #14b8a6 2px, transparent 2px),
-    radial-gradient(circle at 80% 70%, #e8f9f1 2px, transparent 2px),
-    radial-gradient(circle at 60% 20%, #163057 2px, transparent 2px),
-    radial-gradient(circle at 40% 80%, #14b8a6 1px, transparent 1px),
-    radial-gradient(circle at 90% 30%, #e0f5ed 1px, transparent 1px);
+.lxr-mining-card:hover { transform: translateY(-6px); box-shadow: 0 30px 60px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.2); }
+.lxr-network-lines,.lxr-crypto-mesh,.lxr-circuit{ position:absolute; inset:0; pointer-events:none; }
+.lxr-network-lines{
+  opacity:.15; background-image:
+  radial-gradient(circle at 20% 30%, #14b8a6 2px, transparent 2px),
+  radial-gradient(circle at 80% 70%, #e8f9f1 2px, transparent 2px),
+  radial-gradient(circle at 60% 20%, #163057 2px, transparent 2px),
+  radial-gradient(circle at 40% 80%, #14b8a6 1px, transparent 1px),
+  radial-gradient(circle at 90% 30%, #e0f5ed 1px, transparent 1px);
   background-size: 60px 60px, 80px 80px, 70px 70px, 40px 40px, 50px 50px;
 }
-.lxr-crypto-mesh {
-  opacity: .08;
-  background-image:
-    linear-gradient(30deg, transparent 40%, rgba(20,184,166,0.3) 41%, rgba(20,184,166,0.3) 42%, transparent 43%),
-    linear-gradient(150deg, transparent 40%, rgba(232,249,241,0.3) 41%, rgba(232,249,241,0.3) 42%, transparent 43%),
-    linear-gradient(90deg, transparent 40%, rgba(22,48,87,0.3) 41%, rgba(22,48,87,0.3) 42%, transparent 43%);
+.lxr-crypto-mesh{
+  opacity:.08; background-image:
+  linear-gradient(30deg, transparent 40%, rgba(20,184,166,0.3) 41%, rgba(20,184,166,0.3) 42%, transparent 43%),
+  linear-gradient(150deg, transparent 40%, rgba(232,249,241,0.3) 41%, rgba(232,249,241,0.3) 42%, transparent 43%),
+  linear-gradient(90deg, transparent 40%, rgba(22,48,87,0.3) 41%, rgba(22,48,87,0.3) 42%, transparent 43%);
   background-size: 120px 120px, 100px 100px, 80px 80px;
 }
-.lxr-circuit {
-  opacity: .2;
-  background-image:
-    linear-gradient(90deg, rgba(20,184,166,0.1) 1px, transparent 1px),
-    linear-gradient(rgba(20,184,166,0.1) 1px, transparent 1px);
-  background-size: 20px 20px;
-}
-.lxr-holo {
-  position: absolute; top: 0; left: 0; height: 4px; width: 100%;
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    rgba(20,184,166,0.35) 25%,
-    rgba(232,249,241,0.35) 50%,
-    rgba(224,245,237,0.35) 75%,
-    transparent 100%
-  );
+.lxr-circuit{ opacity:.2; background-image: linear-gradient(90deg, rgba(20,184,166,0.1) 1px, transparent 1px), linear-gradient(rgba(20,184,166,0.1) 1px, transparent 1px); background-size: 20px 20px; }
+.lxr-holo{ position:absolute; top:0; left:0; height:4px; width:100%;
+  background: linear-gradient(90deg, transparent 0%, rgba(20,184,166,0.35) 25%, rgba(232,249,241,0.35) 50%, rgba(224,245,237,0.35) 75%, transparent 100%);
   animation: lxr-holographic 3s ease-in-out infinite;
 }
-@keyframes lxr-holographic {
-  0%, 100% { transform: translateX(-100%); }
-  50% { transform: translateX(300%); }
-}
-.lxr-lexori-logo {
-  background: linear-gradient(45deg, #14b8a6, #e8f9f1, #14b8a6);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  text-shadow: 0 0 30px rgba(20, 184, 166, 0.5);
-}
-.lxr-coin-icon {
-  width: 42px; height: 42px; border-radius: 9999px;
-  display: flex; align-items: center; justify-content: center;
-  background: linear-gradient(45deg, #14b8a6, #e8f9f1);
-  color: #000; font-weight: 800;
-  animation: lxr-coinRotate 4s linear infinite;
-}
-@keyframes lxr-coinRotate {
-  0% { transform: rotateY(0deg); }
-  100% { transform: rotateY(360deg); }
-}
-.lxr-panel {
-  background: rgba(0,0,0,0.3);
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(255,255,255,0.1);
-  border-radius: 12px;
-  padding: 12px;
-}
-.lxr-quantity {
-  width: 100%;
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: rgba(255,255,255,0.05);
-  border: 2px solid rgba(20,184,166,0.3);
-  color: #fff;
-  font-weight: 700;
-  font-size: 15px;
-  transition: all .3s ease;
-}
-.lxr-quantity:focus {
-  background: rgba(255,255,255,0.1);
-  border-color: #14b8a6;
-  outline: none;
-  box-shadow: 0 0 20px rgba(20,184,166,0.3);
-}
-.lxr-quantity.lxr-invalid {
-  border-color: #ef4444;
-  box-shadow: 0 0 20px rgba(239,68,68,0.3);
-}
-.lxr-buy-btn {
-  min-width: 130px;
-  padding: 10px 16px;
-  border-radius: 10px;
-  border: none;
-  font-weight: 800;
-  color: #fff;
-  background: linear-gradient(45deg, #14b8a6, #e0f5ed);
-  box-shadow: 0 4px 15px rgba(20,184,166,0.3);
-  cursor: pointer;
-  transition: all .3s ease;
-}
-.lxr-buy-btn:hover {
-  background: linear-gradient(45deg, #e0f5ed, #14b8a6);
-  transform: translateY(-2px);
-  box-shadow: 0 8px 25px rgba(20,184,166,0.4);
-}
-.lxr-buy-btn:disabled {
-  opacity: .7; filter: grayscale(0.3); cursor: not-allowed;
-}
-.lxr-msg {
-  margin-top: 10px;
-  padding: 10px 12px;
-  border-radius: 12px;
-  text-align: center;
-  font-weight: 700;
-  color: #fff;
-  display: flex; align-items: center; justify-content: center; gap: 8px;
-  box-shadow: 0 6px 20px rgba(0,0,0,0.15);
-}
-.lxr-msg--success {
-  background: linear-gradient(90deg, #22c55e, #16a34a);
-}
-.lxr-msg--error {
-  background: linear-gradient(90deg, #ef4444, #dc2626);
-}
+@keyframes lxr-holographic{ 0%,100%{ transform:translateX(-100%)} 50%{ transform:translateX(300%)} }
+.lxr-lexori-logo{ background:linear-gradient(45deg, #14b8a6, #e8f9f1, #14b8a6); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; text-shadow:0 0 30px rgba(20,184,166,0.5); }
+.lxr-coin-icon{ width:42px; height:42px; border-radius:9999px; display:flex; align-items:center; justify-content:center; background:linear-gradient(45deg, #14b8a6, #e8f9f1); color:#000; font-weight:800; animation: lxr-coinRotate 4s linear infinite; }
+@keyframes lxr-coinRotate{ 0%{ transform:rotateY(0deg) } 100%{ transform:rotateY(360deg) } }
+.lxr-panel{ background:rgba(0,0,0,0.3); backdrop-filter:blur(10px); border:1px solid rgba(255,255,255,0.1); border-radius:12px; padding:12px; }
+.lxr-quantity{ width:100%; padding:10px 12px; border-radius:10px; background:rgba(255,255,255,0.05); border:2px solid rgba(20,184,166,0.3); color:#fff; font-weight:700; font-size:15px; transition:all .3s ease; }
+.lxr-quantity:focus{ background:rgba(255,255,255,0.1); border-color:#14b8a6; outline:none; box-shadow:0 0 20px rgba(20,184,166,0.3); }
+.lxr-quantity.lxr-invalid{ border-color:#ef4444; box-shadow:0 0 20px rgba(239,68,68,0.3); }
+.lxr-buy-btn{ min-width:130px; padding:10px 16px; border-radius:10px; border:none; font-weight:800; color:#0b1b3b; background:linear-gradient(45deg, #14b8a6, #e0f5ed); box-shadow:0 4px 15px rgba(20,184,166,0.3); cursor:pointer; transition:all .3s ease; }
+.lxr-buy-btn:hover{ background:linear-gradient(45deg, #e0f5ed, #14b8a6); transform:translateY(-2px); box-shadow:0 8px 25px rgba(20,184,166,0.4); }
+.lxr-buy-btn:disabled{ opacity:.7; filter:grayscale(0.2); cursor:not-allowed; }
+.lxr-msg{ margin-top:10px; padding:10px 12px; border-radius:12px; text-align:center; font-weight:700; color:#fff; display:flex; align-items:center; justify-content:center; gap:8px; box-shadow:0 6px 20px rgba(0,0,0,0.15); }
+.lxr-msg--success{ background:linear-gradient(90deg, #22c55e, #16a34a); }
+.lxr-msg--error{ background:linear-gradient(90deg, #ef4444, #dc2626); }
 `
 
 const Dashboard: React.FC = () => {
   const { account, userId, disconnect } = useWallet()
   const queryClient = useQueryClient()
-  const [isProcessing, setIsProcessing] = useState(false)
-  const [activeTab, setActiveTab] = useState<'home' | 'surprise'>('home')
 
-  // New: dropdown state
+  // Active tab + cookies
+  const [activeTab, setActiveTabState] = useState<'home' | 'surprise'>(() => {
+    const c = getCookie('activeTab')
+    return c === 'surprise' ? 'surprise' : 'home'
+  })
+  const setActiveTab = (tab: 'home' | 'surprise') => {
+    setActiveTabState(tab)
+    setCookie('activeTab', tab, 365)
+  }
+
+  const [isProcessing, setIsProcessing] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement | null>(null)
 
@@ -334,7 +312,12 @@ const Dashboard: React.FC = () => {
     return () => clearTimeout(t)
   }, [inlineMsg])
 
-  // Prevent copy/select/context menu
+  // Apply theme cookie
+  useEffect(() => {
+    setCookie('theme', 'lexori', 365)
+  }, [])
+
+  // Prevent copy/select/context menu (kept as before)
   useEffect(() => {
     const prevent = (e: Event) => e.preventDefault()
     document.addEventListener('copy', prevent)
@@ -487,32 +470,33 @@ const Dashboard: React.FC = () => {
     }
   }
 
-  const [miningAmount, setMiningAmount] = useState<string>('5.00')
+  // Mining form with cookie persisted amount
+  const [miningAmount, setMiningAmount] = useState<string>(() => getCookie('miningAmount') || '5.00')
+  useEffect(() => {
+    setCookie('miningAmount', miningAmount || '', 30)
+  }, [miningAmount])
+
   const amountNum = Number(miningAmount || '0')
   const isInvalidAmount = miningAmount !== '' && (isNaN(amountNum) || amountNum < 5)
 
   const handleBuyMiner = async () => {
     if (!isValidAddress(account)) return
-    // validate min 5
     if (isNaN(amountNum) || amountNum < 5) {
       setInlineMsg({ type: 'error', text: 'Minimum $5.00 required!' })
       showErrorToast('Minimum 5 USDT required.')
       return
     }
-
     setIsProcessing(true)
     try {
       const tx1 = await approveUSDT(miningAmount)
       if ((tx1 as any)?.wait) await (tx1 as any).wait()
       const tx2 = await buyMiner(miningAmount)
       if ((tx2 as any)?.wait) await (tx2 as any).wait()
-
       showSuccessToast('Miner purchased on-chain')
       setInlineMsg({
         type: 'success',
         text: `Successfully purchased $${Number(miningAmount).toFixed(2)} worth of Lexori Coin mining power!`,
       })
-      setMiningAmount('5.00')
       queryClient.invalidateQueries({ queryKey: ['miningStats', account] })
     } catch (e) {
       showErrorToast(e, 'Failed to buy miner')
@@ -527,7 +511,7 @@ const Dashboard: React.FC = () => {
       <div style={styles.card}>
         <h3 style={styles.cardTitle}>Available Balance</h3>
         {isOnChainLoading ? (
-          <div style={{ height: 26, background: '#eef2f6', borderRadius: 8 }} />
+          <div style={{ height: 26, background: 'rgba(255,255,255,0.08)', borderRadius: 8 }} />
         ) : (
           <div style={styles.balance}>${safeMoney(onChainData?.userBalance)}</div>
         )}
@@ -578,9 +562,7 @@ const Dashboard: React.FC = () => {
       <div style={styles.grid}>
         <div style={styles.card}>
           <h3 style={styles.cardTitle}>Total Coin Balance</h3>
-          <div style={styles.balance}>
-            {isStatsLoading ? '...' : coinBalance}
-          </div>
+          <div style={styles.balance}>{isStatsLoading ? '...' : coinBalance}</div>
           <button style={styles.buttonGhost} disabled>
             Withdraw (Coming Soon)
           </button>
@@ -606,7 +588,7 @@ const Dashboard: React.FC = () => {
                   <div className="lxr-lexori-logo" style={{ fontSize: 22, fontWeight: 900, letterSpacing: 1 }}>
                     LEXORI
                   </div>
-                  <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, color: '#14b8a6' }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, color: colors.accent }}>
                     MINING CARD
                   </div>
                 </div>
@@ -614,7 +596,7 @@ const Dashboard: React.FC = () => {
               </div>
 
               {/* Info */}
-              <div style={{ textAlign: 'center', marginBottom: 12, fontSize: 13, fontWeight: 600, color: '#14b8a6' }}>
+              <div style={{ textAlign: 'center', marginBottom: 12, fontSize: 13, fontWeight: 600, color: colors.accent }}>
                 You will receive coins equal to your investment amount daily for 30 days
               </div>
 
@@ -622,7 +604,7 @@ const Dashboard: React.FC = () => {
               <div className="lxr-panel" style={{ marginBottom: 12 }}>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
                   <div style={{ flex: 1 }}>
-                    <label htmlFor="lxr-qty" style={{ display: 'block', fontSize: 11, fontWeight: 700, marginBottom: 4, color: '#14b8a6' }}>
+                    <label htmlFor="lxr-qty" style={{ display: 'block', fontSize: 11, fontWeight: 700, marginBottom: 4, color: colors.accent }}>
                       Quantity (USD)
                     </label>
                     <input
@@ -649,14 +631,14 @@ const Dashboard: React.FC = () => {
               {/* Minimum */}
               <div style={{ marginBottom: 12 }}>
                 <div style={{ color: '#d1d5db', fontSize: 12, marginBottom: 4 }}>Minimum Purchase Option</div>
-                <div style={{ color: '#14b8a6', fontSize: 20, fontWeight: 800 }}>$5.00 USD</div>
+                <div style={{ color: colors.accent, fontSize: 20, fontWeight: 800 }}>$5.00 USD</div>
               </div>
 
               {/* Serial */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, paddingTop: 10, borderTop: '1px solid rgba(255,255,255,0.2)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, paddingTop: 10, borderTop: `1px solid ${colors.grayLine}` }}>
                 <div>
                   <div style={{ fontSize: 11, color: '#9ca3af' }}>CARD ID</div>
-                  <div style={{ fontFamily: 'monospace', fontSize: 12, color: '#14b8a6' }}>{cardId}</div>
+                  <div style={{ fontFamily: 'monospace', fontSize: 12, color: colors.accent }}>{cardId}</div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
                   <div style={{ fontSize: 11, color: '#9ca3af' }}>VALID THRU</div>
@@ -678,7 +660,7 @@ const Dashboard: React.FC = () => {
             </div>
           )}
 
-          {/* Mining stats (summary) */}
+          {/* Mining stats */}
           <div style={{ ...styles.small, marginTop: 10 }}>
             Your Mining Stats: Miners <strong>{miningStats?.count ?? 0}</strong> • Total Deposited{' '}
             <strong>${safeMoney(miningStats?.totalDeposited)}</strong>
@@ -710,7 +692,7 @@ const Dashboard: React.FC = () => {
             <>
               <div style={styles.divider} />
               <div style={styles.small}>
-                Registration fee (on‑chain): <strong>${safeMoney(onChainData.registrationFee)}</strong>
+                Registration fee (on‑chain): <strong style={{ color: colors.accent }}>${safeMoney(onChainData.registrationFee)}</strong>
               </div>
               <div style={{ ...styles.small, marginTop: 4 }}>
                 Commission percentages — L1: 40% • L2: 20% • L3: 10% (estimated on‑chain)
@@ -726,7 +708,8 @@ const Dashboard: React.FC = () => {
     <div style={styles.page}>
       <div style={styles.container}>
         <div style={styles.topBar}>
-          <div style={styles.brand}>Web3 Community</div>
+          {/* Brand with gradient text */}
+          <div className="lxr-lexori-logo" style={styles.brand as any}>Web3 Community</div>
 
           {/* userId + user icon with dropdown */}
           <div style={styles.userMenuWrap} ref={menuRef}>
@@ -777,6 +760,9 @@ const Dashboard: React.FC = () => {
             <span style={styles.navIcon}>🎁</span>
           </button>
         </div>
+
+        {/* Inject mining card/theme CSS once */}
+        <style dangerouslySetInnerHTML={{ __html: lexoriCSS }} />
 
         {activeTab === 'home' ? renderHome() : renderSurprise()}
       </div>
