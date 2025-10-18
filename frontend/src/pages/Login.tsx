@@ -15,29 +15,27 @@ const colors = {
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  page: {
-    minHeight: '100vh',
-    width: '100%',
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    userSelect: 'none', padding: '24px 12px', color: colors.text,
-  },
+  page: { minHeight: '100vh', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', userSelect: 'none', padding: '24px 12px', color: colors.text },
   wrap: { width: '100%', maxWidth: 880 },
   surfaceInner: { position: 'relative', zIndex: 2, textAlign: 'center' },
-  brand: { fontWeight: 900, fontSize: '1.8rem', letterSpacing: 1, marginBottom: 8 },
+
+  badge: {
+    display: 'inline-flex', alignItems: 'center', gap: 8, padding: '8px 14px', borderRadius: 999,
+    fontSize: 12, fontWeight: 700, background: 'rgba(20,184,166,0.12)', color: colors.text, border: '1px solid rgba(20,184,166,0.25)', marginBottom: 12,
+  },
+  title: { fontSize: '2.0rem', fontWeight: 800, margin: '0 0 8px 0', letterSpacing: .5 },
   subtitle: { margin: '0 auto 18px', fontSize: '1rem', maxWidth: 720, color: colors.textMuted },
+
   cta: { marginTop: 12, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 },
   button: {
-    background: `linear-gradient(45deg, ${colors.accent}, ${colors.accentSoft})`,
-    color: '#0b1b3b', border: 'none', outline: 'none',
-    padding: '14px 22px', borderRadius: 14, fontSize: '1.05rem', fontWeight: 800, cursor: 'pointer',
-    minWidth: 220, boxShadow: '0 6px 18px rgba(20,184,166,0.3)',
+    background: `linear-gradient(45deg, ${colors.accent}, ${colors.accentSoft})`, color: '#0b1b3b', border: 'none', outline: 'none',
+    padding: '14px 22px', borderRadius: 14, fontSize: '1.05rem', fontWeight: 800, cursor: 'pointer', minWidth: 220, boxShadow: '0 6px 18px rgba(20,184,166,0.3)',
   },
   buttonDisabled: { opacity: 0.7, cursor: 'not-allowed' },
   hint: { fontSize: 13, color: colors.textMuted },
   error: { fontSize: 13, color: colors.danger, fontWeight: 800 },
 }
 
-// Surface wrapper (uses global theme CSS)
 const Surface: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <div className="lxr-surface">
     <div className="lxr-surface-lines" />
@@ -63,7 +61,6 @@ const Login: React.FC = () => {
     return isValidAddress(account) ? 'Continue' : 'Connect Wallet'
   }, [phase, account])
 
-  // Optional: block copy/select/context menu
   useEffect(() => {
     const prevent = (e: Event) => e.preventDefault()
     document.addEventListener('copy', prevent); document.addEventListener('cut', prevent)
@@ -128,7 +125,10 @@ const Login: React.FC = () => {
       <div style={styles.wrap}>
         <Surface>
           <div style={styles.surfaceInner}>
-            <div className="lxr-lexori-logo" style={styles.brand as any}>Web3 Community</div>
+            <div style={styles.badge}>Decentralized • Blockchain‑powered • Web3</div>
+            <h1 className="lxr-lexori-logo" style={styles.title as any}>
+              Welcome to our decentralized, blockchain‑powered Web3 community.
+            </h1>
             <p style={styles.subtitle}>Connect your wallet to continue.</p>
 
             <div style={styles.cta}>
