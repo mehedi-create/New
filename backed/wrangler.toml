@@ -22,4 +22,4 @@ CONTRACT_ADDRESS = "0x15f802f435C4aADEA55807687F22DbfB8f893ecB"
 binding = "DB"
 database_name = "referral_db"
 # Replace with your actual D1 database id if different
-database_id = "49d6c30c-eab4-41cf-a536-6cad98bde0d8"
+database_id = "33ea7916-62b6-4ec0-b2ff-efbefb1f86f9"
