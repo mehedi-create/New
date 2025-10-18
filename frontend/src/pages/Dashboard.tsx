@@ -39,7 +39,6 @@ const getCookie = (name: string): string | null => {
 }
 
 const colors = {
-  // Dark Lexori theme
   deepNavy: '#0b1b3b',
   navySoft: '#163057',
   accent: '#14b8a6',
@@ -145,13 +144,14 @@ const styles: Record<string, React.CSSProperties & Record<string, any>> = {
     fontWeight: 800,
     cursor: 'pointer',
     color: colors.text,
+    display: 'grid',
+    placeItems: 'center',
   },
   navBtnActive: {
     background: `linear-gradient(45deg, ${colors.accent}, ${colors.accentSoft})`,
     color: '#0b1b3b',
     borderColor: colors.accent,
   },
-  navIcon: { fontSize: 18 },
 
   grid: { display: 'grid', gridTemplateColumns: '1fr', gap: 12, alignItems: 'stretch' },
 
@@ -233,7 +233,24 @@ const styles: Record<string, React.CSSProperties & Record<string, any>> = {
   divider: { height: 1, background: colors.grayLine, margin: '6px 0' },
 }
 
-// Lexori Mining Card CSS (scoped)
+/* High-quality inline SVG icons */
+const IconHome: React.FC<{ size?: number }> = ({ size = 20 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" role="img" aria-hidden="true" focusable="false">
+    <path d="M3 10.5L12 3l9 7.5v8.5a2 2 0 0 1-2 2h-5v-6H10v6H5a2 2 0 0 1-2-2v-8.5z" fill="currentColor"/>
+  </svg>
+)
+
+const IconSurpriseCoin: React.FC<{ size?: number }> = ({ size = 20 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" role="img" aria-hidden="true" focusable="false">
+    {/* Coin ring */}
+    <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="2"/>
+    <circle cx="12" cy="12" r="4.5" fill="none" stroke="currentColor" strokeWidth="2"/>
+    {/* Sparkle star (surprise) */}
+    <path d="M17.4 4.8l.5 1.4 1.4.5-1.4.5-.5 1.4-.5-1.4-1.4-.5 1.4-.5.5-1.4z" fill="currentColor"/>
+  </svg>
+)
+
+// Lexori Mining Card CSS (animations removed)
 const lexoriCSS = `
 .lxr-mining-card {
   color: #fff; position: relative; overflow: hidden;
@@ -245,9 +262,10 @@ const lexoriCSS = `
     radial-gradient(circle at 40% 60%, rgba(22,48,87,0.2) 0%, transparent 50%),
     linear-gradient(135deg, #0b1b3b 0%, #163057 30%, #0b1b3b 70%, #163057 100%);
   box-shadow: 0 15px 30px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.1), inset 0 0 50px rgba(20,184,166,0.05);
-  transition: all .4s ease; border: 1px solid rgba(20,184,166,0.2);
+  transition: all .3s ease; border: 1px solid rgba(20,184,166,0.2);
 }
-.lxr-mining-card:hover { transform: translateY(-6px); box-shadow: 0 30px 60px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.2); }
+/* Hover: no transform animation, only subtle shadow change */
+.lxr-mining-card:hover { box-shadow: 0 22px 44px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.2); }
 .lxr-network-lines,.lxr-crypto-mesh,.lxr-circuit{ position:absolute; inset:0; pointer-events:none; }
 .lxr-network-lines{
   opacity:.15; background-image:
@@ -266,20 +284,19 @@ const lexoriCSS = `
   background-size: 120px 120px, 100px 100px, 80px 80px;
 }
 .lxr-circuit{ opacity:.2; background-image: linear-gradient(90deg, rgba(20,184,166,0.1) 1px, transparent 1px), linear-gradient(rgba(20,184,166,0.1) 1px, transparent 1px); background-size: 20px 20px; }
+/* Holographic strip without animation */
 .lxr-holo{ position:absolute; top:0; left:0; height:4px; width:100%;
   background: linear-gradient(90deg, transparent 0%, rgba(20,184,166,0.35) 25%, rgba(232,249,241,0.35) 50%, rgba(224,245,237,0.35) 75%, transparent 100%);
-  animation: lxr-holographic 3s ease-in-out infinite;
 }
-@keyframes lxr-holographic{ 0%,100%{ transform:translateX(-100%)} 50%{ transform:translateX(300%)} }
 .lxr-lexori-logo{ background:linear-gradient(45deg, #14b8a6, #e8f9f1, #14b8a6); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; text-shadow:0 0 30px rgba(20,184,166,0.5); }
-.lxr-coin-icon{ width:42px; height:42px; border-radius:9999px; display:flex; align-items:center; justify-content:center; background:linear-gradient(45deg, #14b8a6, #e8f9f1); color:#000; font-weight:800; animation: lxr-coinRotate 4s linear infinite; }
-@keyframes lxr-coinRotate{ 0%{ transform:rotateY(0deg) } 100%{ transform:rotateY(360deg) } }
+/* Coin icon without rotation animation */
+.lxr-coin-icon{ width:42px; height:42px; border-radius:9999px; display:flex; align-items:center; justify-content:center; background:linear-gradient(45deg, #14b8a6, #e8f9f1); color:#000; font-weight:800; }
 .lxr-panel{ background:rgba(0,0,0,0.3); backdrop-filter:blur(10px); border:1px solid rgba(255,255,255,0.1); border-radius:12px; padding:12px; }
-.lxr-quantity{ width:100%; padding:10px 12px; border-radius:10px; background:rgba(255,255,255,0.05); border:2px solid rgba(20,184,166,0.3); color:#fff; font-weight:700; font-size:15px; transition:all .3s ease; }
-.lxr-quantity:focus{ background:rgba(255,255,255,0.1); border-color:#14b8a6; outline:none; box-shadow:0 0 20px rgba(20,184,166,0.3); }
-.lxr-quantity.lxr-invalid{ border-color:#ef4444; box-shadow:0 0 20px rgba(239,68,68,0.3); }
-.lxr-buy-btn{ min-width:130px; padding:10px 16px; border-radius:10px; border:none; font-weight:800; color:#0b1b3b; background:linear-gradient(45deg, #14b8a6, #e0f5ed); box-shadow:0 4px 15px rgba(20,184,166,0.3); cursor:pointer; transition:all .3s ease; }
-.lxr-buy-btn:hover{ background:linear-gradient(45deg, #e0f5ed, #14b8a6); transform:translateY(-2px); box-shadow:0 8px 25px rgba(20,184,166,0.4); }
+.lxr-quantity{ width:100%; padding:10px 12px; border-radius:10px; background:rgba(255,255,255,0.05); border:2px solid rgba(20,184,166,0.3); color:#fff; font-weight:700; font-size:15px; transition:all .2s ease; }
+.lxr-quantity:focus{ background:rgba(255,255,255,0.1); border-color:#14b8a6; outline:none; box-shadow:0 0 12px rgba(20,184,166,0.25); }
+.lxr-quantity.lxr-invalid{ border-color:#ef4444; box-shadow:0 0 12px rgba(239,68,68,0.25); }
+.lxr-buy-btn{ min-width:130px; padding:10px 16px; border-radius:10px; border:none; font-weight:800; color:#0b1b3b; background:linear-gradient(45deg, #14b8a6, #e0f5ed); box-shadow:0 4px 15px rgba(20,184,166,0.3); cursor:pointer; transition:background .2s ease, opacity .2s ease; }
+.lxr-buy-btn:hover{ background:linear-gradient(45deg, #e0f5ed, #14b8a6); }
 .lxr-buy-btn:disabled{ opacity:.7; filter:grayscale(0.2); cursor:not-allowed; }
 .lxr-msg{ margin-top:10px; padding:10px 12px; border-radius:12px; text-align:center; font-weight:700; color:#fff; display:flex; align-items:center; justify-content:center; gap:8px; box-shadow:0 6px 20px rgba(0,0,0,0.15); }
 .lxr-msg--success{ background:linear-gradient(90deg, #22c55e, #16a34a); }
@@ -317,7 +334,7 @@ const Dashboard: React.FC = () => {
     setCookie('theme', 'lexori', 365)
   }, [])
 
-  // Prevent copy/select/context menu (kept as before)
+  // Prevent copy/select/context menu (kept)
   useEffect(() => {
     const prevent = (e: Event) => e.preventDefault()
     document.addEventListener('copy', prevent)
@@ -571,7 +588,7 @@ const Dashboard: React.FC = () => {
         <div style={styles.card}>
           <h3 style={styles.cardTitle}>Mining</h3>
 
-          {/* Scoped CSS for Lexori card */}
+          {/* Inject Mining Card CSS (no animations) */}
           <style dangerouslySetInnerHTML={{ __html: lexoriCSS }} />
 
           {/* Lexori Mining Card */}
@@ -741,7 +758,7 @@ const Dashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* Icon-only navigation */}
+        {/* Icon-only navigation (SVG icons, not emoji) */}
         <div style={styles.navRow}>
           <button
             style={{ ...styles.navBtn, ...(activeTab === 'home' ? styles.navBtnActive : {}) }}
@@ -749,7 +766,7 @@ const Dashboard: React.FC = () => {
             title="Home"
             aria-label="Home"
           >
-            <span style={styles.navIcon}>🏠</span>
+            <IconHome size={20} />
           </button>
           <button
             style={{ ...styles.navBtn, ...(activeTab === 'surprise' ? styles.navBtnActive : {}) }}
@@ -757,12 +774,9 @@ const Dashboard: React.FC = () => {
             title="Surprise"
             aria-label="Surprise"
           >
-            <span style={styles.navIcon}>🎁</span>
+            <IconSurpriseCoin size={20} />
           </button>
         </div>
-
-        {/* Inject mining card/theme CSS once */}
-        <style dangerouslySetInnerHTML={{ __html: lexoriCSS }} />
 
         {activeTab === 'home' ? renderHome() : renderSurprise()}
       </div>
