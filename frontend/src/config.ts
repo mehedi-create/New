@@ -21,7 +21,7 @@ const testnetConfig: AppConfig = {
   // Smart contract addresses
   contractAddress:
     (import.meta as any)?.env?.VITE_PLATFORM_ADDRESS ||
-    '0x15f802f435C4aADEA55807687F22DbfB8f893ecB',
+    '0x6938008a060E8Bef0aB9CcB1d93aCF880602fAe6',
   usdtAddress:
     (import.meta as any)?.env?.VITE_USDT_ADDRESS ||
     '0x337610d27c682E347C9cD60BD4b3b107C9d34dDd',
