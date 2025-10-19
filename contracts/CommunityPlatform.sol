@@ -1,4 +1,3 @@
-// main/contracts/CommunityPlatform.sol
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -17,16 +16,23 @@ interface IERC20 {
  * - Fund-code protected user withdrawal (commission balance)
  * - Admin commission withdrawal (owner only)
  * - Mining (on-chain): only records purchase and holds USDT as vault
- *   - Off-chain will calculate points; on-chain keeps only per-user minerCount and total deposited
- * - Liquidity withdrawal (owner): withdraw USDT collected via miner purchases (vault)
+ * - Liquidity withdrawal (owner)
  * - Root (owner) auto-registered on deploy with given userId + fund-code hash
+ *
+ * Notes:
+ * - Pass registrationFee in token units (e.g., 12e18 or 12e6 depending on USDT decimals)
+ * - User/Referrer ID must be 6–8 characters (ASCII)
  */
 contract CommunityPlatform is ReentrancyGuard, Ownable {
     // ---------- Config ----------
     IERC20 public immutable usdtToken;
-    uint256 public immutable registrationFee;   // e.g., 12e18
-    uint256 public immutable minMinerPurchase;  // e.g., 5e18
+    uint256 public immutable registrationFee;   // e.g., 12e18 or 12e6
+    uint256 public immutable minMinerPurchase;  // e.g., 5e18 or 5e6
     uint16  public constant MINING_DURATION_DAYS = 30;
+
+    // User ID constraints
+    uint8 public constant MIN_ID_LEN = 6;
+    uint8 public constant MAX_ID_LEN = 8;
 
     // ---------- Users / Referral ----------
     mapping(address => bool) public isRegistered;
@@ -45,11 +51,8 @@ contract CommunityPlatform is ReentrancyGuard, Ownable {
     mapping(address => bool) public admins;
 
     // ---------- Mining (vault + counters only) ----------
-    // Per-user miner purchase count and total USDT deposited via miners
     mapping(address => uint256) public minerCount;
     mapping(address => uint256) public totalMinerDeposited;
-
-    // Total USDT collected via miner purchases
     uint256 public totalCollected;
 
     // ---------- Events ----------
@@ -57,30 +60,23 @@ contract CommunityPlatform is ReentrancyGuard, Ownable {
     event FundCodeHashSet(address indexed user);
     event Withdrawal(address indexed user, uint256 amount);
     event CommissionWithdrawn(address indexed admin, uint256 amount);
-
-    // Mining purchase recorded (off-chain will calculate points)
-    event MinerPurchased(
-        address indexed user,
-        uint256 amount,      // raw units (USDT smallest units)
-        uint256 startTime,   // block timestamp
-        uint256 endTime      // startTime + 30 days
-    );
-
-    // Liquidity withdrawal (owner)
+    event MinerPurchased(address indexed user, uint256 amount, uint256 startTime, uint256 endTime);
     event LiquidityWithdrawn(address indexed to, uint256 amount);
 
     // ---------- Constructor ----------
     constructor(
         address _usdtToken,
-        uint256 _registrationFee,
-        string memory _rootUserId,
-        bytes32 _rootUserFundCodeHash,
-        uint256 _minMinerPurchase
+        uint256 _registrationFee,          // pass 12 USDT in token decimals
+        string memory _rootUserId,         // 6–8 chars
+        bytes32 _rootUserFundCodeHash,     // keccak256(abi.encodePacked(code))
+        uint256 _minMinerPurchase          // pass 5 USDT in token decimals (min miner buy)
     ) Ownable(msg.sender) {
         require(_usdtToken != address(0), "USDT address required");
         require(_registrationFee > 0, "Fee must be > 0");
         require(_minMinerPurchase > 0, "Min purchase must be > 0");
-        require(bytes(_rootUserId).length == 6, "Root User ID must be 6 characters.");
+
+        uint256 rootLen = bytes(_rootUserId).length;
+        require(rootLen >= MIN_ID_LEN && rootLen <= MAX_ID_LEN, "Root User ID: 6-8 chars");
 
         usdtToken = IERC20(_usdtToken);
         registrationFee = _registrationFee;
@@ -107,9 +103,14 @@ contract CommunityPlatform is ReentrancyGuard, Ownable {
         string calldata _fundCode
     ) external nonReentrant {
         require(!isRegistered[msg.sender], "Already registered");
-        require(bytes(_userId).length == 6, "User ID must be 6 characters.");
+
+        uint256 ulen = bytes(_userId).length;
+        require(ulen >= MIN_ID_LEN && ulen <= MAX_ID_LEN, "User ID: 6-8 chars");
         require(userIdToAddress[_userId] == address(0), "User ID already taken");
         require(bytes(_fundCode).length >= 4, "Fund code too short");
+
+        uint256 rlen = bytes(_referrerId).length;
+        require(rlen >= MIN_ID_LEN && rlen <= MAX_ID_LEN, "Referrer ID: 6-8 chars");
 
         address referrerAddress = userIdToAddress[_referrerId];
         require(isRegistered[referrerAddress], "Invalid referrer ID");
@@ -153,6 +154,15 @@ contract CommunityPlatform is ReentrancyGuard, Ownable {
         adminCommissions[owner()] = 0;
         require(usdtToken.transfer(owner(), amount), "Transfer failed");
         emit CommissionWithdrawn(owner(), amount);
+    }
+
+    // Frontend ABI compatibility (read helpers)
+    function isAdmin(address a) external view returns (bool) {
+        return admins[a];
+    }
+
+    function getAdminCommission(address a) external view returns (uint256) {
+        return adminCommissions[a];
     }
 
     // ---------- Mining (on-chain vault + minimal user record) ----------
@@ -236,7 +246,6 @@ contract CommunityPlatform is ReentrancyGuard, Ownable {
         return userFundCodeHashes[_user] != bytes32(0);
     }
 
-    // Helper view for off-chain UI
     function getUserMiningStats(address user) external view returns (uint256 count, uint256 totalDeposited) {
         return (minerCount[user], totalMinerDeposited[user]);
     }
