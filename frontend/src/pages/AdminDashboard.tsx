@@ -270,13 +270,7 @@ Timestamp: ${ts}`
   }
 
   if (isRoleLoading) {
-    return (
-      <div style={styles.page}>
-        <div style={styles.container}>
-          <Surface><div style={{ fontWeight: 900 }}>Checking admin access…</div></Surface>
-        </div>
-      </div>
-    )
+    return null
   }
 
   if (!role?.isAdmin) {
