@@ -25,7 +25,7 @@ const Loader: React.FC<{ text?: string }> = ({ text = 'Loading…' }) => (
 const ScrollToTop: React.FC = () => {
   const { pathname } = useLocation()
   useEffect(() => {
-    window.scrollTo({ top: 0, behavior: 'instant' as any })
+    window.scrollTo({ top: 0, behavior: 'auto' })
   }, [pathname])
   return null
 }
@@ -46,7 +46,7 @@ const RequireRegistered: React.FC<{ children: React.ReactElement }> = ({ childre
   return children
 }
 
-// Simple wallet-protected wrapper (AdminDashboard নিজেই admin/owner guard করে)
+// Simple wallet-protected (AdminDashboard নিজে admin/owner গার্ড করে)
 const Protected: React.FC<{ children: React.ReactElement }> = ({ children }) => {
   const { account } = useWallet()
   if (!account) return <Navigate to="/login" replace />
@@ -63,15 +63,7 @@ const AppRouter: React.FC = () => {
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
 
-          <Route
-            path="/dashboard"
-            element={
-              <RequireRegistered>
-                <Dashboard />
-              </RequireRegistered>
-            }
-          />
-
+          {/* Admin route must be before the catch-all to avoid premature redirect */}
           <Route
             path="/admin"
             element={
@@ -81,6 +73,16 @@ const AppRouter: React.FC = () => {
             }
           />
 
+          <Route
+            path="/dashboard"
+            element={
+              <RequireRegistered>
+                <Dashboard />
+              </RequireRegistered>
+            }
+          />
+
+          {/* Keep this last */}
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
       </Suspense>
