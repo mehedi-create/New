@@ -49,6 +49,7 @@ const PLATFORM_ABI = [
   'function registrationFee() view returns (uint256)',
   'function owner() view returns (address)',
   'function getContractBalance() view returns (uint256)',
+  'function totalCollected() view returns (uint256)', // NEW
 
   // optional admin (catch if missing)
   'function isAdmin(address) view returns (bool)',
@@ -100,6 +101,10 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 // Basic caches to avoid repeated heavy scans
 const referralCache = new Map<string, { ts: number; list: string[] }>()
 const miningCache = new Map<string, { ts: number; stats: { count: number; totalDeposited: string } }>()
+const ANALYTICS_TTL_MS = 60_000
+
+const totalUsersCache: { ts: number; value: number } = { ts: 0, value: 0 }
+const topRefCache = new Map<string, { ts: number; list: { address: string; userId: string; count: number }[] }>()
 
 const CACHE_TTL_MS = 60_000
 
@@ -168,6 +173,16 @@ export const getAdminCommission = async (address: string) => {
 export const getContractBalance = async () => {
   try {
     const raw: bigint = await platformRead.getContractBalance()
+    return formatUnits(raw || 0n, USDT_DECIMALS)
+  } catch {
+    return '0'
+  }
+}
+
+// NEW: Total liquidity collected via miners
+export const getTotalCollected = async () => {
+  try {
+    const raw: bigint = await (platformRead as any).totalCollected()
     return formatUnits(raw || 0n, USDT_DECIMALS)
   } catch {
     return '0'
@@ -328,4 +343,108 @@ export const getUserMiningStats = async (userAddress: string, opts?: {
   const stats = { count, totalDeposited: formatUnits(totalRaw, USDT_DECIMALS) }
   miningCache.set(key, { ts: now, stats })
   return stats
+}
+
+// ---------- Chain analytics (admin dashboard) ----------
+
+// Total registered users (unique addresses) by scanning UserRegistered
+export const getTotalUsersFromChain = async (opts?: {
+  startBlock?: number
+  maxBlocks?: number
+  step?: number
+}) => {
+  const now = Date.now()
+  if (now - totalUsersCache.ts < ANALYTICS_TTL_MS) return totalUsersCache.value
+
+  const latest = await readProvider.getBlockNumber()
+  const startConfigured = typeof config.startBlock === 'number' ? config.startBlock : Number(config.startBlock || 0)
+  const maxBlocks = opts?.maxBlocks ?? 200_000
+  const step = Math.min(Math.max(opts?.step ?? 50_000, 10_000), 100_000)
+
+  const fromBlock = startConfigured > 0 ? startConfigured : Math.max(0, latest - maxBlocks)
+  const toBlock = latest
+
+  const users = new Set<string>()
+
+  for (let from = fromBlock; from <= toBlock; from += step + 1) {
+    const end = Math.min(from + step, toBlock)
+    try {
+      const logs = await readProvider.getLogs({
+        address: PLATFORM_ADDRESS,
+        fromBlock: from,
+        toBlock: end,
+        topics: [TOPIC_USER_REGISTERED],
+      })
+      for (const lg of logs) {
+        try {
+          const parsed = IFACE.parseLog(lg)
+          const userAddr = ethers.getAddress(parsed?.args?.user || ethers.ZeroAddress)
+          if (userAddr !== ethers.ZeroAddress) users.add(userAddr)
+        } catch {}
+      }
+    } catch {}
+    await sleep(120)
+  }
+
+  totalUsersCache.ts = now
+  totalUsersCache.value = users.size
+  return users.size
+}
+
+// Top referrers (by count of referrals) — returns [{address,userId,count}]
+export const getTopReferrersFromChain = async (
+  limit = 10,
+  opts?: { startBlock?: number; maxBlocks?: number; step?: number }
+) => {
+  const key = `LIM:${limit}|SB:${opts?.startBlock ?? config.startBlock ?? 0}`
+  const cached = topRefCache.get(key)
+  const now = Date.now()
+  if (cached && now - cached.ts < ANALYTICS_TTL_MS) return cached.list
+
+  const latest = await readProvider.getBlockNumber()
+  const startConfigured = typeof config.startBlock === 'number' ? config.startBlock : Number(config.startBlock || 0)
+  const maxBlocks = opts?.maxBlocks ?? 200_000
+  const step = Math.min(Math.max(opts?.step ?? 50_000, 10_000), 100_000)
+
+  const fromBlock = startConfigured > 0 ? startConfigured : Math.max(0, latest - maxBlocks)
+  const toBlock = latest
+
+  const counts = new Map<string, number>()
+
+  for (let from = fromBlock; from <= toBlock; from += step + 1) {
+    const end = Math.min(from + step, toBlock)
+    try {
+      const logs = await readProvider.getLogs({
+        address: PLATFORM_ADDRESS,
+        fromBlock: from,
+        toBlock: end,
+        topics: [TOPIC_USER_REGISTERED],
+      })
+      for (const lg of logs) {
+        try {
+          const parsed = IFACE.parseLog(lg)
+          const ref = parsed?.args?.referrer as string
+          if (ref && ref !== ethers.ZeroAddress) {
+            const addr = ethers.getAddress(ref)
+            counts.set(addr, (counts.get(addr) || 0) + 1)
+          }
+        } catch {}
+      }
+    } catch {}
+    await sleep(120)
+  }
+
+  const sorted = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]).slice(0, limit)
+  const out: { address: string; userId: string; count: number }[] = []
+
+  for (const [address, count] of sorted) {
+    let userId = ''
+    try {
+      userId = String(await platformRead.addressToUserId(address))
+    } catch {}
+    out.push({ address, userId, count })
+  }
+
+  topRefCache.set(key, { ts: now, list: out })
+  return out
 }
