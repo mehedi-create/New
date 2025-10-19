@@ -13,7 +13,7 @@ type Bindings = {
 
 const app = new Hono<{ Bindings: Bindings }>()
 
-// in-memory light guards
+// in-memory guards (simple, per-worker)
 const inflightUpsert = new Set<string>()
 const lastUpsertAt = new Map<string, number>()
 
@@ -97,7 +97,7 @@ const PLATFORM_ABI = [
 ]
 
 function getProvider(env: Bindings): JsonRpcProvider {
-  const url = env.BSC_RPC_URL
+  const url = (env.BSC_RPC_URL || '').replace(/\/+$/, '')
   if (!url) throw new Error('BSC_RPC_URL is not configured')
   return new JsonRpcProvider(url)
 }
@@ -190,6 +190,48 @@ async function ensureUserInDb(env: Bindings, address: string) {
   return true
 }
 
+// ---------- Debug endpoints ----------
+app.get('/api/debug/rpc', async (c) => {
+  try {
+    const net = await getProvider(c.env).getNetwork()
+    return c.json({ ok: true, chainId: Number(net.chainId), contract: c.env.CONTRACT_ADDRESS })
+  } catch (e: any) {
+    return c.json({ ok: false, error: e?.message || 'rpc error' }, 500)
+  }
+})
+app.get('/api/debug/contract', async (c) => {
+  try {
+    const owner = await getContract(c.env, getProvider(c.env)).owner()
+    return c.json({ ok: true, owner })
+  } catch (e: any) {
+    return c.json({ ok: false, error: e?.message || 'contract error' }, 500)
+  }
+})
+app.get('/api/debug/chain/:address', async (c) => {
+  const { address } = c.req.param()
+  if (!ethers.isAddress(address)) return c.json({ error: 'Invalid address' }, 400)
+  try {
+    const p = await getChainProfile(c.env, address)
+    if (!p) return c.json({ registered: false })
+    return c.json({ registered: true, ...p })
+  } catch (e: any) {
+    return c.json({ error: e?.message || 'chain error' }, 500)
+  }
+})
+app.get('/api/debug/db/:address', async (c) => {
+  const { address } = c.req.param()
+  if (!ethers.isAddress(address)) return c.json({ error: 'Invalid address' }, 400)
+  try {
+    const row = await c.env.DB
+      .prepare('SELECT user_id, wallet_address FROM users WHERE wallet_address = ?')
+      .bind(address.toLowerCase())
+      .first()
+    return c.json({ exists: !!row, user: row || null })
+  } catch (e: any) {
+    return c.json({ error: e?.message || 'db error' }, 500)
+  }
+})
+
 // ---------- API Routes ----------
 
 // Health
@@ -209,7 +251,7 @@ app.post('/api/users/upsert-from-chain', async (c) => {
 
     const nowSec = Math.floor(Date.now() / 1000)
     if (Math.abs(nowSec - Number(timestamp)) > 300) {
-      return c.json({ error: 'Signature expired, please try again.' }, 400)
+      return c.json({ error: 'Signature expired' }, 400)
     }
 
     // light rate-limit + inflight dedup (return 200 instead of 429/409)
@@ -273,10 +315,7 @@ app.post('/api/users/:address/login', async (c) => {
 
     if (!results || results.length === 0) {
       await c.env.DB.batch([
-        c.env.DB.prepare('INSERT INTO logins (wallet_address, login_date) VALUES (?, ?)').bind(
-          lower,
-          loginDate
-        ),
+        c.env.DB.prepare('INSERT INTO logins (wallet_address, login_date) VALUES (?, ?)').bind(lower, loginDate),
         c.env.DB
           .prepare('UPDATE users SET coin_balance = coin_balance + 1 WHERE wallet_address = ?')
           .bind(lower),
@@ -295,7 +334,7 @@ app.post('/api/users/:address/login', async (c) => {
   }
 })
 
-// Off-chain stats
+// Off-chain stats only
 app.get('/api/stats/:address', async (c) => {
   try {
     const { address } = c.req.param()
