@@ -1,9 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useWallet } from '../context/WalletContext'
-import { isRegistered } from '../utils/contract'
+import { isRegistered, isAdmin as isAdminOnChain, getOwner } from '../utils/contract'
 import { useNavigate } from 'react-router-dom'
 import { isValidAddress } from '../utils/wallet'
-import { isAdmin as isAdminOnChain, getOwner } from '../utils/contract'
 
 type Phase = 'idle' | 'connecting' | 'checking'
 
@@ -16,27 +15,36 @@ const colors = {
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  page: { minHeight: '100vh', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', userSelect: 'none', padding: '24px 12px', color: colors.text },
+  page: {
+    minHeight: '100vh',
+    width: '100%',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    userSelect: 'none', padding: '24px 12px', color: colors.text,
+  },
   wrap: { width: '100%', maxWidth: 880 },
   surfaceInner: { position: 'relative', zIndex: 2, textAlign: 'center' },
 
   badge: {
     display: 'inline-flex', alignItems: 'center', gap: 8, padding: '8px 14px', borderRadius: 999,
-    fontSize: 12, fontWeight: 700, background: 'rgba(20,184,166,0.12)', color: colors.text, border: '1px solid rgba(20,184,166,0.25)', marginBottom: 12,
+    fontSize: 12, fontWeight: 700, background: 'rgba(20,184,166,0.12)', color: colors.text,
+    border: '1px solid rgba(20,184,166,0.25)', marginBottom: 12,
   },
   title: { fontSize: '2.0rem', fontWeight: 800, margin: '0 0 8px 0', letterSpacing: .5 },
   subtitle: { margin: '0 auto 18px', fontSize: '1rem', maxWidth: 720, color: colors.textMuted },
 
   cta: { marginTop: 12, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 },
   button: {
-    background: `linear-gradient(45deg, ${colors.accent}, ${colors.accentSoft})`, color: '#0b1b3b', border: 'none', outline: 'none',
-    padding: '14px 22px', borderRadius: 14, fontSize: '1.05rem', fontWeight: 800, cursor: 'pointer', minWidth: 220, boxShadow: '0 6px 18px rgba(20,184,166,0.3)',
+    background: `linear-gradient(45deg, ${colors.accent}, ${colors.accentSoft})`,
+    color: '#0b1b3b', border: 'none', outline: 'none',
+    padding: '14px 22px', borderRadius: 14, fontSize: '1.05rem', fontWeight: 800, cursor: 'pointer',
+    minWidth: 220, boxShadow: '0 6px 18px rgba(20,184,166,0.3)',
   },
   buttonDisabled: { opacity: 0.7, cursor: 'not-allowed' },
   hint: { fontSize: 13, color: colors.textMuted },
   error: { fontSize: 13, color: colors.danger, fontWeight: 800 },
 }
 
+// Themed surface (global CSS classes)
 const Surface: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <div className="lxr-surface">
     <div className="lxr-surface-lines" />
@@ -53,6 +61,7 @@ const Login: React.FC = () => {
   const [phase, setPhase] = useState<Phase>('idle')
   const [error, setError] = useState<string>('')
 
+  // Keep latest account to avoid stale closure in wait loop
   const accountRef = useRef<string | null>(account)
   useEffect(() => { accountRef.current = account }, [account])
 
@@ -62,13 +71,18 @@ const Login: React.FC = () => {
     return isValidAddress(account) ? 'Continue' : 'Connect Wallet'
   }, [phase, account])
 
+  // Optional: block copy/select/context menu
   useEffect(() => {
     const prevent = (e: Event) => e.preventDefault()
-    document.addEventListener('copy', prevent); document.addEventListener('cut', prevent)
-    document.addEventListener('contextmenu', prevent); document.addEventListener('selectstart', prevent)
+    document.addEventListener('copy', prevent)
+    document.addEventListener('cut', prevent)
+    document.addEventListener('contextmenu', prevent)
+    document.addEventListener('selectstart', prevent)
     return () => {
-      document.removeEventListener('copy', prevent); document.removeEventListener('cut', prevent)
-      document.removeEventListener('contextmenu', prevent); document.removeEventListener('selectstart', prevent)
+      document.removeEventListener('copy', prevent)
+      document.removeEventListener('cut', prevent)
+      document.removeEventListener('contextmenu', prevent)
+      document.removeEventListener('selectstart', prevent)
     }
   }, [])
 
@@ -83,24 +97,28 @@ const Login: React.FC = () => {
   }
 
   const checkAndRedirect = async (addr: string) => {
-  setPhase('checking')
-  try {
-    const [owner, adminFlag] = await Promise.all([getOwner(), isAdminOnChain(addr)])
-    const isOwner = owner.toLowerCase() === addr.toLowerCase()
-    if (adminFlag || isOwner) {
-      navigate('/admin', { replace: true })
-      return
-    }
-    const reg = await isRegistered(addr)
-    if (reg) navigate('/dashboard', { replace: true })
-    else navigate('/register', { replace: true })
-  } catch (err: any) {
-    setError(typeof err?.message === 'string' ? err.message : 'Failed to check status. Please try again.')
-  } finally {
-    setPhase('idle')
-  }
-}
+    setPhase('checking')
+    try {
+      // Admin/Owner check first
+      const [owner, adminFlag] = await Promise.all([getOwner(), isAdminOnChain(addr)])
+      const isOwner = owner.toLowerCase() === addr.toLowerCase()
+      if (adminFlag || isOwner) {
+        navigate('/admin', { replace: true })
+        return
+      }
 
+      // Then normal user flow
+      const reg = await isRegistered(addr)
+      if (reg) navigate('/dashboard', { replace: true })
+      else navigate('/register', { replace: true })
+    } catch (err: any) {
+      setError(typeof err?.message === 'string' ? err.message : 'Failed to check status. Please try again.')
+    } finally {
+      setPhase('idle')
+    }
+  }
+
+  // Auto-redirect if already connected
   useEffect(() => {
     if (!isConnecting && phase === 'idle' && isValidAddress(account)) {
       checkAndRedirect(account!)
@@ -118,7 +136,10 @@ const Login: React.FC = () => {
       setPhase('connecting')
       await connect()
       const addr = await waitForAccount()
-      if (!addr) { setError('Wallet address not detected. Please try again.'); return }
+      if (!addr) {
+        setError('Wallet address not detected. Please try again.')
+        return
+      }
       await checkAndRedirect(addr)
     } catch (err: any) {
       setError(typeof err?.message === 'string' ? err.message : 'Failed to connect. Please try again.')
@@ -143,13 +164,21 @@ const Login: React.FC = () => {
                 onClick={handleConnect}
                 disabled={phase !== 'idle' || isConnecting}
                 style={{ ...styles.button, ...(phase !== 'idle' || isConnecting ? styles.buttonDisabled : {}) }}
-                onMouseOver={(e) => { (e.currentTarget as HTMLButtonElement).style.background = `linear-gradient(45deg, ${colors.accentSoft}, ${colors.accent})` }}
-                onMouseOut={(e) => { (e.currentTarget as HTMLButtonElement).style.background = `linear-gradient(45deg, ${colors.accent}, ${colors.accentSoft})` }}
+                onMouseOver={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.background =
+                    `linear-gradient(45deg, ${colors.accentSoft}, ${colors.accent})`
+                }}
+                onMouseOut={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.background =
+                    `linear-gradient(45deg, ${colors.accent}, ${colors.accentSoft})`
+                }}
               >
                 {buttonLabel}
               </button>
 
-              {(phase === 'connecting' || phase === 'checking') && <div style={styles.hint}>Please approve in your wallet…</div>}
+              {(phase === 'connecting' || phase === 'checking') && (
+                <div style={styles.hint}>Please approve in your wallet…</div>
+              )}
               {!!error && <div style={styles.error}>{error}</div>}
             </div>
           </div>
