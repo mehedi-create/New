@@ -13,7 +13,7 @@ compatibility_date = "2024-01-01"
 ALLOWED_ORIGINS = "http://localhost:5173,https://mehedi35x.pages.dev"
 
 # RPC used by the backend for light reads (owner check, minimal verifies)
-BSC_RPC_URL = "https://data-seed-prebsc-1-s1.binance.org:8545/"
+BSC_RPC_URL = "https://bsc-testnet-rpc.publicnode.com"
 
 # Must match frontend/src/config.ts
 CONTRACT_ADDRESS = "0x6938008a060E8Bef0aB9CcB1d93aCF880602fAe6"
