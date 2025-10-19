@@ -2,6 +2,7 @@
 import React, { Suspense, lazy, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { useWallet } from './context/WalletContext'
+import AdminDashboard from './pages/AdminDashboard'
 
 const Login = lazy(() => import('./pages/Login'))
 const Register = lazy(() => import('./pages/Register'))
@@ -61,6 +62,7 @@ const AppRouter: React.FC = () => {
             }
           />
           <Route path="*" element={<Navigate to="/login" replace />} />
+          <Route path="/admin" element={<Protected><AdminDashboard /></Protected>} />
         </Routes>
       </Suspense>
     </BrowserRouter>
