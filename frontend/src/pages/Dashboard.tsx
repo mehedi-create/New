@@ -11,9 +11,10 @@ import {
   getUserMiningStats,
   getRegistrationFee,
   getLevel1ReferralIdsFromChain,
+  isRegistered, // NEW
 } from '../utils/contract'
 import { showSuccessToast, showErrorToast } from '../utils/notification'
-import { markLogin, getStats, type StatsResponse } from '../services/api'
+import { markLogin, getStats, type StatsResponse, upsertUserFromChain } from '../services/api' // UPDATED
 import { isValidAddress } from '../utils/wallet'
 
 type OnChainData = {
@@ -156,6 +157,7 @@ const Dashboard: React.FC = () => {
     return () => { document.removeEventListener('mousedown', onDocClick); document.removeEventListener('keydown', onKey) }
   }, [])
 
+  // ---------- On-chain data ----------
   const { data: onChainData, isLoading: isOnChainLoading } = useQuery<OnChainData | null>({
     queryKey: ['onChainData', account],
     enabled: isValidAddress(account),
@@ -170,6 +172,7 @@ const Dashboard: React.FC = () => {
     },
   })
 
+  // ---------- Referrals ----------
   const { data: referralList = [], isLoading: isRefsLoading } = useQuery<string[]>({
     queryKey: ['referralsL1', account],
     enabled: isValidAddress(account),
@@ -180,6 +183,7 @@ const Dashboard: React.FC = () => {
     },
   })
 
+  // ---------- Mining stats ----------
   useQuery<{ count: number; totalDeposited: string }>({
     queryKey: ['miningStats', account],
     enabled: isValidAddress(account),
@@ -190,6 +194,7 @@ const Dashboard: React.FC = () => {
     },
   })
 
+  // ---------- Off-chain stats (lite) ----------
   const { data: stats, isLoading: _isStatsLoading, refetch: refetchStatsLite } = useQuery<StatsResponse | null>({
     queryKey: ['stats-lite', account],
     enabled: isValidAddress(account),
@@ -202,6 +207,40 @@ const Dashboard: React.FC = () => {
     },
   })
 
+  // ---------- Auto-sync: on-chain registered but off-chain missing → silent upsert ----------
+  const ensureRef = useRef<{ inFlight: boolean; last: number }>({ inFlight: false, last: 0 })
+  useEffect(() => {
+    if (!isValidAddress(account)) return
+    const run = async () => {
+      const now = Date.now()
+      if (ensureRef.current.inFlight || now - ensureRef.current.last < 10000) return
+      ensureRef.current.inFlight = true
+      try {
+        const onChain = await isRegistered(account!)
+        if (!onChain) return
+        let exists = false
+        try {
+          const res = await getStats(account!)
+          exists = !!res?.data?.userId
+        } catch (e: any) {
+          const status = e?.response?.status || e?.status
+          if (status !== 404) return // অন্য এরর হলে সাইলেন্ট
+        }
+        if (!exists) {
+          const { timestamp, signature } = await signAuthMessage(account!)
+          await upsertUserFromChain(account!, timestamp, signature)
+          await refetchStatsLite()
+        }
+      } catch {
+        // silent
+      } finally {
+        ensureRef.current.inFlight = false
+        ensureRef.current.last = Date.now()
+      }
+    }
+    run()
+  }, [account, refetchStatsLite])
+
   const referralCode = useMemo(() => (userId || '').toUpperCase(), [userId])
   const displayUserId = useMemo(() => (userId || stats?.userId || 'USER').toUpperCase(), [userId, stats?.userId])
   const referralLink = useMemo(() => `${window.location.origin}/register?ref=${referralCode}`, [referralCode])
@@ -210,7 +249,7 @@ const Dashboard: React.FC = () => {
   const copyToClipboard = (text: string) => { navigator.clipboard.writeText(text); showSuccessToast('Copied to clipboard') }
   const coinBalanceText = Number(stats?.coin_balance ?? 0).toFixed(2)
 
-  // modals
+  // ---------- Modals ----------
   const [showCoinInfo, setShowCoinInfo] = useState(false)
   const [showFundModal, setShowFundModal] = useState(false)
   const [fundCode, setFundCode] = useState('')
@@ -236,6 +275,7 @@ const Dashboard: React.FC = () => {
     }
   }
 
+  // ---------- Actions ----------
   const handleUserPayout = () => {
     if (!onChainData?.hasFundCode) { showErrorToast('Fund code not set. Please register with a fund code.'); return }
     openFundModal()
@@ -246,10 +286,26 @@ const Dashboard: React.FC = () => {
     setIsProcessing(true)
     try {
       const { timestamp, signature } = await signAuthMessage(account!)
-      await markLogin(account!, timestamp, signature)
+      // First try markLogin
+      try {
+        await markLogin(account!, timestamp, signature)
+      } catch (err: any) {
+        const status = err?.response?.status || err?.status
+        if (status === 404) {
+          // upsert silently then retry
+          await upsertUserFromChain(account!, timestamp, signature)
+          await markLogin(account!, timestamp, signature)
+        } else {
+          throw err
+        }
+      }
       showSuccessToast('Login counted for today')
       await refetchStatsLite()
-    } catch (e) { showErrorToast(e, 'Unable to mark login') } finally { setIsProcessing(false) }
+    } catch (e) {
+      showErrorToast(e, 'Unable to mark login')
+    } finally {
+      setIsProcessing(false)
+    }
   }
 
   const [miningAmount, setMiningAmount] = useState<string>(() => getCookie('miningAmount') || '5.00')
@@ -269,6 +325,7 @@ const Dashboard: React.FC = () => {
     } catch (e) { showErrorToast(e, 'Failed to buy miner') } finally { setIsProcessing(false) }
   }
 
+  // ---------- Renderers ----------
   const renderHome = () => (
     <div style={styles.grid}>
       <div style={styles.cardShell}>
@@ -482,7 +539,7 @@ const Dashboard: React.FC = () => {
       <div style={styles.container}>
         <div style={styles.topBar}>
           <div className="lxr-lexori-logo" style={styles.brand as any}>Web3 Community</div>
-          <div style={styles.userMenuWrap} ref={menuRef}>
+        <div style={styles.userMenuWrap} ref={menuRef}>
             <span style={styles.userIdText} title={displayUserId}>{displayUserId}</span>
             <button style={styles.userMenuBtn} onClick={() => setMenuOpen(v => !v)} aria-haspopup="menu" aria-expanded={menuOpen} aria-label="User menu">
               <IconUser size={18} />
