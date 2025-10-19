@@ -1,4 +1,4 @@
-// backed/src/index.ts
+// backend/src/index.ts
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { ethers, JsonRpcProvider, Contract } from 'ethers'
@@ -156,13 +156,51 @@ function todayISODate() {
   return new Date().toISOString().slice(0, 10)
 }
 
+// ---------- Chain profile helpers ----------
+async function getChainProfile(env: Bindings, address: string): Promise<{ userId: string; referrerId: string } | null> {
+  const provider = getProvider(env)
+  const contract = getContract(env, provider)
+  const [registered, userId, refAddr] = await Promise.all([
+    contract.isRegistered(address),
+    contract.addressToUserId(address),
+    contract.referrerOf(address),
+  ])
+  if (!registered || !userId) return null
+  let referrerId = ''
+  if (refAddr && refAddr !== ethers.ZeroAddress) {
+    try { referrerId = await contract.addressToUserId(refAddr) } catch {}
+  }
+  return { userId, referrerId }
+}
+
+async function ensureUserInDb(env: Bindings, address: string) {
+  const lower = address.toLowerCase()
+  const exists = await env.DB
+    .prepare('SELECT 1 FROM users WHERE wallet_address = ?')
+    .bind(lower)
+    .first()
+  if (exists) return true
+  const profile = await getChainProfile(env, address)
+  if (!profile) return false
+  await upsertDbUser(env.DB, {
+    walletAddress: address,
+    userId: profile.userId,
+    referrerId: profile.referrerId || '',
+  })
+  return true
+}
+
 // ---------- API Routes ----------
 
 // Health
 app.get('/api/health', (c) => c.json({ ok: true, time: Date.now() }))
 
-// Upsert user (signed) — front-end gets on-chain data directly; backend only verifies lightly.
+// Upsert user (signed) — idempotent (no 409 on inflight)
 app.post('/api/users/upsert-from-chain', async (c) => {
+  const cleanup = (key: string) => {
+    inflightUpsert.delete(key)
+    lastUpsertAt.set(key, Date.now())
+  }
   try {
     const body = await c.req.json<{ address: string; timestamp: number; signature: string }>()
     const { address, timestamp, signature } = body || ({} as any)
@@ -174,53 +212,39 @@ app.post('/api/users/upsert-from-chain', async (c) => {
       return c.json({ error: 'Signature expired, please try again.' }, 400)
     }
 
-    // light rate-limit
+    // light rate-limit + inflight dedup (return 200 instead of 429/409)
     const key = address.toLowerCase()
     const now = Date.now()
     const last = lastUpsertAt.get(key) || 0
-    if (now - last < 5000) return c.json({ error: 'Please wait a few seconds and try again.' }, 429)
-    if (inflightUpsert.has(key)) return c.json({ error: 'Sync in progress. Please wait.' }, 409)
+    if (now - last < 5000) {
+      return c.json({ ok: true, dedup: true })
+    }
+    if (inflightUpsert.has(key)) {
+      return c.json({ ok: true, inflight: true })
+    }
     inflightUpsert.add(key)
 
     const msg = buildUserAuthMessage(address, Number(timestamp))
     await verifySignedMessage(address, msg, signature)
 
-    // Minimal on-chain verify (no log scan)
-    const provider = getProvider(c.env)
-    const contract = getContract(c.env, provider)
-    const [registered, userId, refAddr] = await Promise.all([
-      contract.isRegistered(address),
-      contract.addressToUserId(address),
-      contract.referrerOf(address),
-    ])
-    if (!registered || !userId) {
-      inflightUpsert.delete(key)
-      return c.json({ error: 'Address not registered on-chain' }, 400)
-    }
-
-    let referrerId = ''
-    if (refAddr && refAddr !== ethers.ZeroAddress) {
-      try {
-        referrerId = await contract.addressToUserId(refAddr)
-      } catch {}
-    }
+    const profile = await getChainProfile(c.env, address)
+    if (!profile) { cleanup(key); return c.json({ error: 'Address not registered on-chain' }, 400) }
 
     await upsertDbUser(c.env.DB, {
       walletAddress: address,
-      userId,
-      referrerId: referrerId || '',
+      userId: profile.userId,
+      referrerId: profile.referrerId || '',
     })
 
-    lastUpsertAt.set(key, now)
-    inflightUpsert.delete(key)
-    return c.json({ ok: true, userId, referrerId: referrerId || '' })
+    cleanup(key)
+    return c.json({ ok: true, userId: profile.userId, referrerId: profile.referrerId || '' })
   } catch (e: any) {
     console.error('POST /api/users/upsert-from-chain error:', e.stack || e.message)
     return c.json({ error: 'Server error' }, 500)
   }
 })
 
-// Daily login (signed) → +1 coin/day
+// Daily login (signed) → +1 coin/day (auto-ensure user in DB)
 app.post('/api/users/:address/login', async (c) => {
   try {
     const { address } = c.req.param()
@@ -236,14 +260,11 @@ app.post('/api/users/:address/login', async (c) => {
     const msg = buildUserAuthMessage(address, Number(timestamp))
     await verifySignedMessage(address, msg, signature)
 
-    const lower = address.toLowerCase()
-    // must exist in DB (ask user to Sign & Sync first)
-    const exists = await c.env.DB
-      .prepare('SELECT 1 FROM users WHERE wallet_address = ?')
-      .bind(lower)
-      .first()
-    if (!exists) return c.json({ error: 'User not found. Please sync first.' }, 404)
+    // Ensure user exists in DB (fetch from chain if needed)
+    const ok = await ensureUserInDb(c.env, address)
+    if (!ok) return c.json({ error: 'Address not registered on-chain' }, 400)
 
+    const lower = address.toLowerCase()
     const loginDate = todayISODate()
     const { results } = await c.env.DB
       .prepare('SELECT id FROM logins WHERE wallet_address = ? AND login_date = ?')
@@ -274,7 +295,7 @@ app.post('/api/users/:address/login', async (c) => {
   }
 })
 
-// Off-chain stats only (coins/logins + stored userId); on-chain সব ফ্রন্টএন্ড নেবে
+// Off-chain stats
 app.get('/api/stats/:address', async (c) => {
   try {
     const { address } = c.req.param()
@@ -293,7 +314,6 @@ app.get('/api/stats/:address', async (c) => {
       .first<{ cnt: number }>()
     const totalLoginDays = loginRow?.cnt || 0
 
-    // শুধুই off-chain অংশ ফিরিয়ে দিচ্ছি
     return c.json({
       userId: user.user_id,
       coin_balance: user.coin_balance || 0,
