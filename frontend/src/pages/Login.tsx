@@ -3,6 +3,7 @@ import { useWallet } from '../context/WalletContext'
 import { isRegistered } from '../utils/contract'
 import { useNavigate } from 'react-router-dom'
 import { isValidAddress } from '../utils/wallet'
+import { isAdmin as isAdminOnChain, getOwner } from '../utils/contract'
 
 type Phase = 'idle' | 'connecting' | 'checking'
 
@@ -82,17 +83,23 @@ const Login: React.FC = () => {
   }
 
   const checkAndRedirect = async (addr: string) => {
-    setPhase('checking')
-    try {
-      const reg = await isRegistered(addr)
-      if (reg) navigate('/dashboard', { replace: true })
-      else navigate('/register', { replace: true })
-    } catch (err: any) {
-      setError(typeof err?.message === 'string' ? err.message : 'Failed to check status. Please try again.')
-    } finally {
-      setPhase('idle')
+  setPhase('checking')
+  try {
+    const [owner, adminFlag] = await Promise.all([getOwner(), isAdminOnChain(addr)])
+    const isOwner = owner.toLowerCase() === addr.toLowerCase()
+    if (adminFlag || isOwner) {
+      navigate('/admin', { replace: true })
+      return
     }
+    const reg = await isRegistered(addr)
+    if (reg) navigate('/dashboard', { replace: true })
+    else navigate('/register', { replace: true })
+  } catch (err: any) {
+    setError(typeof err?.message === 'string' ? err.message : 'Failed to check status. Please try again.')
+  } finally {
+    setPhase('idle')
   }
+}
 
   useEffect(() => {
     if (!isConnecting && phase === 'idle' && isValidAddress(account)) {
