@@ -1,4 +1,3 @@
-// frontend/src/services/api.ts
 import axios from 'axios'
 import { config } from '../config'
 
@@ -37,6 +36,18 @@ export type NoticePayload = {
   is_active?: boolean
   priority?: number
   kind?: 'image' | 'text' | 'script'
+}
+
+export type AdminOverviewResponse = {
+  ok: boolean
+  total_users: number
+  total_coins: number
+}
+
+export type AdminTopReferrer = {
+  address: string
+  userId: string
+  count: number
 }
 
 // ---------------- Health ----------------
@@ -82,6 +93,20 @@ export const markLoginSmart = async (address: string) => {
   }
 }
 
+// ---------------- Mining (off-chain record) ----------------
+// Verify tx on-chain then record purchase for daily coin credits
+export const recordMiningPurchase = async (address: string, txHash: string) => {
+  const { signAuthMessage } = await import('../utils/contract')
+  const { timestamp, signature } = await signAuthMessage(address)
+  return enqueueWrite(() =>
+    api.post(
+      '/api/mining/record-purchase',
+      { address, tx_hash: txHash, timestamp, signature },
+      { timeout: 45000 }
+    )
+  )
+}
+
 // ---------------- Notices ----------------
 export const getNotices = (params?: { limit?: number; active?: 0 | 1 }) =>
   api.get('/api/notices', { params })
@@ -91,6 +116,13 @@ export const createNotice = (payload: NoticePayload) =>
 
 export const updateNotice = (id: number, payload: NoticePayload) =>
   enqueueWrite(() => api.patch(`/api/notices/${id}`, payload, { timeout: 45000 }))
+
+// ---------------- Admin (stats) ----------------
+export const getAdminOverview = () =>
+  api.get<AdminOverviewResponse>('/api/admin/overview')
+
+export const getAdminTopReferrers = (limit = 10) =>
+  api.get<{ ok: boolean; top: AdminTopReferrer[] }>('/api/admin/top-referrers', { params: { limit } })
 
 // ---------------- Bootstrap helper (legacy) ----------------
 export const getUserBootstrap = async (address: string) => {
