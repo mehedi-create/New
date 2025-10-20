@@ -12,36 +12,17 @@ import {
   withdrawLiquidity,
   getTotalCollected,
 } from '../utils/contract'
+import {
+  createNotice,
+  updateNotice,
+  deleteNotice,
+  getAdminNotices,
+  type AdminNotice,
+} from '../services/api'
 import { showSuccessToast, showErrorToast } from '../utils/notification'
-import { createNotice, getAdminOverview, getAdminTopReferrers, type AdminOverviewResponse, type AdminTopReferrer } from '../services/api'
 import { ethers, BrowserProvider } from 'ethers'
 
-// Icons (SVG)
-const IconHome: React.FC<{ size?: number }> = ({ size = 20 }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" role="img" aria-hidden="true">
-    <path d="M3 10.5L12 3l9 7.5v8.5a2 2 0 0 1-2 2h-5v-6H10v6H5a2 2 0 0 1-2-2v-8.5z" fill="currentColor"/>
-  </svg>
-)
-
-const IconFinance: React.FC<{ size?: number }> = ({ size = 20 }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" role="img" aria-hidden="true">
-    <path d="M3 17h18v2H3v-2zm2-3h3v3H5v-3zm5-4h3v7h-3V10zm5-5h3v12h-3V5z" fill="currentColor"/>
-  </svg>
-)
-
-const IconUser: React.FC<{ size?: number }> = ({ size = 18 }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" role="img" aria-hidden="true">
-    <path d="M12 12a5 5 0 1 0-5-5 5.006 5.006 0 0 0 5 5zm0 2c-5 0-9 2.5-9 5.5V22h18v-2.5C21 16.5 17 14 12 14z" fill="currentColor"/>
-  </svg>
-)
-
-const IconInfo: React.FC<{ size?: number }> = ({ size = 14 }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" role="img" aria-hidden="true">
-    <path d="M12 2a10 10 0 1 0 10 10A10.011 10.011 0 0 0 12 2zm0 4a1.25 1.25 0 1 1-1.25 1.25A1.25 1.25 0 0 1 12 6zm2 12h-4v-2h1v-4h-1V10h3v6h1z" fill="currentColor"/>
-  </svg>
-)
-
-// Theme colors (Lexori)
+// Theme colors
 const colors = {
   text: '#e8f9f1',
   textMuted: 'rgba(232,249,241,0.75)',
@@ -51,7 +32,7 @@ const colors = {
   accentSoft: '#e0f5ed',
 }
 
-// Inline styles
+// Styles
 const styles: Record<string, React.CSSProperties> = {
   page: { minHeight: '100vh', width: '100%' },
   container: { maxWidth: 880, margin: '0 auto', padding: '16px 12px 96px' },
@@ -70,7 +51,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   dropdown: {
     position: 'absolute', right: 0, top: 40, background: 'rgba(15,31,63,0.98)',
-    border: `1px solid ${colors.grayLine}`, borderRadius: 10, boxShadow: '0 10px 24px rgba(0,0,0,0.35)',
+    border: `1px solid ${colors.grayLine}`, borderRadius: 10, boxShadow: '0 10px 24px rgba(0,0,0,0.35)`,
     padding: 6, minWidth: 140, zIndex: 100, backdropFilter: 'blur(8px)', color: colors.text,
   },
   dropdownItem: {
@@ -79,7 +60,6 @@ const styles: Record<string, React.CSSProperties> = {
   },
 
   grid: { display: 'grid', gridTemplateColumns: '1fr', gap: 12, alignItems: 'stretch' },
-  row: { display: 'grid', gridTemplateColumns: '1fr', gap: 8, width: '100%' },
 
   input: {
     height: 40, borderRadius: 10, border: '2px solid rgba(20,184,166,0.3)',
@@ -108,6 +88,7 @@ const styles: Record<string, React.CSSProperties> = {
   buttonDanger: {
     height: 44, borderRadius: 10, background: '#b91c1c', color: '#fff', border: 'none', fontSize: 14, fontWeight: 800, cursor: 'pointer', padding: '0 12px',
   },
+  row: { display: 'grid', gridTemplateColumns: '1fr', gap: 8, width: '100%' },
 
   // Bottom nav
   bottomNavWrap: { position: 'fixed', bottom: 12, left: '50%', transform: 'translateX(-50%)', width: '100%', maxWidth: 880, padding: '0 12px', zIndex: 200 },
@@ -116,18 +97,42 @@ const styles: Record<string, React.CSSProperties> = {
   navBtnActive: { background: `linear-gradient(45deg, ${colors.accent}, ${colors.accentSoft})`, color: '#0b1b3b', borderColor: colors.accent },
 }
 
-// Lexori surface wrapper (global CSS classes)
-const Surface: React.FC<{ children: React.ReactNode; style?: React.CSSProperties }> = ({ children, style }) => (
+// Lexori surface
+const Surface: React.FC<{ children: React.ReactNode; style?: React.CSSProperties; title?: string; sub?: string }> = ({ children, style, title, sub }) => (
   <div className="lxr-surface" style={style}>
     <div className="lxr-surface-lines" />
     <div className="lxr-surface-mesh" />
     <div className="lxr-surface-circuit" />
     <div className="lxr-surface-holo" />
-    <div style={{ position: 'relative', zIndex: 2 }}>{children}</div>
+    <div style={{ position: 'relative', zIndex: 2 }}>
+      {title && (
+        <div style={{ fontWeight: 900, marginBottom: 6 }}>
+          {title} {sub && <span style={{ ...styles.small, marginLeft: 6 }}>{sub}</span>}
+        </div>
+      )}
+      {children}
+    </div>
   </div>
 )
 
-type RefTop = { address: string; userId: string; count: number }
+// Icons
+const IconHome: React.FC<{ size?: number }> = ({ size = 20 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" role="img" aria-hidden="true">
+    <path d="M3 10.5L12 3l9 7.5v8.5a2 2 0 0 1-2 2h-5v-6H10v6H5a2 2 0 0 1-2-2v-8.5z" fill="currentColor"/>
+  </svg>
+)
+
+const IconFinance: React.FC<{ size?: number }> = ({ size = 20 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" role="img" aria-hidden="true">
+    <path d="M3 17h18v2H3v-2zm2-3h3v3H5v-3zm5-4h3v7h-3V10zm5-5h3v12h-3V5z" fill="currentColor"/>
+  </svg>
+)
+
+const IconUser: React.FC<{ size?: number }> = ({ size = 18 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" role="img" aria-hidden="true">
+    <path d="M12 12a5 5 0 1 0-5-5 5.006 5.006 0 0 0 5 5zm0 2c-5 0-9 2.5-9 5.5V22h18v-2.5C21 16.5 17 14 12 14z" fill="currentColor"/>
+  </svg>
+)
 
 const AdminDashboard: React.FC = () => {
   const { account, disconnect } = useWallet()
@@ -185,58 +190,18 @@ const AdminDashboard: React.FC = () => {
     },
   })
 
-  // Analytics (off-chain backend)
-  const { data: overview } = useQuery<AdminOverviewResponse>({
-    queryKey: ['adminOverview'],
+  // Admin notices list
+  const { data: adminList = [], refetch: refetchAdminList, isFetching: isListFetching } = useQuery<AdminNotice[]>({
+    queryKey: ['adminNotices'],
     enabled: allow,
-    refetchInterval: 60000,
+    refetchInterval: 30000,
     queryFn: async () => {
-      const res = await getAdminOverview()
-      return res.data
-    },
-  })
-  const totalUsers = overview?.total_users ?? 0
-  const totalCoins = overview?.total_coins ?? 0
-
-  const { data: topRef = [] } = useQuery<RefTop[]>({
-    queryKey: ['topReferrers'],
-    enabled: allow,
-    refetchInterval: 120000,
-    queryFn: async () => {
-      const res = await getAdminTopReferrers(10)
-      return res.data.top || []
+      const res = await getAdminNotices(150)
+      return res.data.notices || []
     },
   })
 
-  // Notice posting
-  type NoticeType = 'image' | 'script'
-  const [noticeType, setNoticeType] = useState<NoticeType>('image')
-  const [title, setTitle] = useState('')
-  const [imageUrl, setImageUrl] = useState('')
-  const [linkUrl, setLinkUrl] = useState('')
-  const [scriptContent, setScriptContent] = useState('')
-  const [isPosting, setIsPosting] = useState(false)
-
-  const readFileAsDataURL = (file: File): Promise<string> =>
-    new Promise((resolve, reject) => {
-      const fr = new FileReader()
-      fr.onload = () => resolve(String(fr.result || ''))
-      fr.onerror = reject
-      fr.readAsDataURL(file)
-    })
-
-  const onPickImage = async (file?: File | null) => {
-    if (!file) return
-    try { setImageUrl(await readFileAsDataURL(file)) } catch (e) { showErrorToast(e, 'Failed to load image') }
-  }
-
-  const wrapScriptIfNeeded = (code: string) => {
-    const trimmed = code.trim()
-    if (!trimmed) return ''
-    if (trimmed.toLowerCase().includes('<script')) return trimmed
-    return `<script>\n${trimmed}\n</script>`
-  }
-
+  // Sign helper
   const signAdminAction = async (purpose: string, address: string) => {
     const provider = new BrowserProvider((window as any).ethereum)
     const signer = await provider.getSigner()
@@ -249,31 +214,91 @@ Timestamp: ${ts}`
     return { timestamp: ts, signature }
   }
 
-  const postNotice = async () => {
+  // Post Notice form state
+  type Tab = 'image' | 'script'
+  const [postTab, setPostTab] = useState<Tab>('image')
+  const [imageUrl, setImageUrl] = useState('')
+  const [linkUrl, setLinkUrl] = useState('')
+  const [scriptContent, setScriptContent] = useState('')
+  const [expireMinutes, setExpireMinutes] = useState<string>('') // blank = permanent
+  const [isPosting, setIsPosting] = useState(false)
+
+  const minutesToSeconds = (mStr: string) => {
+    const m = Number(mStr || '0')
+    return Number.isFinite(m) && m > 0 ? Math.round(m * 60) : undefined
+  }
+
+  const onPostNotice = async () => {
     if (!account) return
-    if (noticeType === 'image' && !imageUrl) { showErrorToast('Please provide an image (upload or URL)'); return }
-    if (noticeType === 'script' && !scriptContent.trim()) { showErrorToast('Please add script content'); return }
-    setIsPosting(true)
     try {
+      setIsPosting(true)
       const { timestamp, signature } = await signAdminAction('create_notice', account)
-      await createNotice({
-        address: account,
-        timestamp,
-        signature,
-        title: title.trim(),
-        is_active: true,
-        priority: 0,
-        kind: noticeType,
-        image_url: noticeType === 'image' ? imageUrl : '',
-        link_url: noticeType === 'image' ? (linkUrl || '') : '',
-        content_html: noticeType === 'script' ? wrapScriptIfNeeded(scriptContent) : '',
-      })
+
+      const expires_in_sec = minutesToSeconds(expireMinutes)
+
+      if (postTab === 'image') {
+        if (!imageUrl.trim()) { showErrorToast('Please provide image URL'); return }
+        await createNotice({
+          address: account,
+          timestamp, signature,
+          kind: 'image',
+          image_url: imageUrl.trim(),
+          link_url: (linkUrl || '').trim(),
+          is_active: true,
+          priority: 0,
+          ...(expires_in_sec ? { expires_in_sec } : {}),
+        })
+      } else {
+        if (!scriptContent.trim()) { showErrorToast('Please provide script content'); return }
+        await createNotice({
+          address: account,
+          timestamp, signature,
+          kind: 'script',
+          content_html: scriptContent,
+          is_active: true,
+          priority: 0,
+          ...(expires_in_sec ? { expires_in_sec } : {}),
+        })
+      }
+
       showSuccessToast('Notice posted')
-      setTitle(''); setImageUrl(''); setLinkUrl(''); setScriptContent('')
+      setImageUrl(''); setLinkUrl(''); setScriptContent(''); setExpireMinutes('')
+      refetchAdminList()
     } catch (e) {
       showErrorToast(e, 'Failed to post notice')
     } finally {
       setIsPosting(false)
+    }
+  }
+
+  // Manage: delete notice
+  const deleteOne = async (id: number) => {
+    if (!account) return
+    if (!window.confirm('Delete this notice?')) return
+    try {
+      const { timestamp, signature } = await signAdminAction('delete_notice', account)
+      await deleteNotice(id, { address: account, timestamp, signature })
+      showSuccessToast('Deleted')
+      refetchAdminList()
+    } catch (e) {
+      showErrorToast(e, 'Failed to delete')
+    }
+  }
+
+  // Manage: quick expiry in minutes
+  const setExpiryMinutes = async (id: number, minutes: number) => {
+    if (!account) return
+    if (!(minutes > 0)) { showErrorToast('Enter minutes > 0'); return }
+    try {
+      const { timestamp, signature } = await signAdminAction('update_notice', account)
+      await updateNotice(id, {
+        address: account, timestamp, signature,
+        expires_in_sec: Math.round(minutes * 60),
+      })
+      showSuccessToast('Expiry set')
+      refetchAdminList()
+    } catch (e) {
+      showErrorToast(e, 'Failed to set expiry')
     }
   }
 
@@ -317,6 +342,7 @@ Timestamp: ${ts}`
 
   // UI helpers
   const displayUserId = useMemo(() => (account || '').slice(0, 6).toUpperCase(), [account])
+  const isExpired = (n: AdminNotice) => !!n.expires_at && new Date(n.expires_at).getTime() <= Date.now()
 
   return (
     <div style={styles.page}>
@@ -349,144 +375,110 @@ Timestamp: ${ts}`
           </div>
         </div>
 
-        {/* Tabs header (surface) */}
-        <div className="lxr-surface" style={{ padding: 8, borderRadius: 14, marginBottom: 12 }}>
-          <div className="lxr-surface-lines" />
-          <div className="lxr-surface-mesh" />
-          <div className="lxr-surface-circuit" />
-          <div className="lxr-surface-holo" />
-          <div style={{ position: 'relative', zIndex: 2, display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 8 }}>
-            <button
-              style={{ ...styles.navBtn, ...(activeTab === 'home' ? styles.navBtnActive : {}) }}
-              onClick={() => setActiveTab('home')}
-              title="Home"
-              aria-label="Home"
-            >
-              <IconHome size={20} />
-            </button>
-            <button
-              style={{ ...styles.navBtn, ...(activeTab === 'finance' ? styles.navBtnActive : {}) }}
-              onClick={() => setActiveTab('finance')}
-              title="Finance"
-              aria-label="Finance"
-            >
-              <IconFinance size={20} />
-            </button>
-          </div>
-        </div>
-
-        {/* Tabs content */}
+        {/* Tabs content (no top nav tabs; only bottom nav) */}
         {activeTab === 'home' ? (
           <div style={styles.grid}>
-            {/* Notice Posting */}
-            <Surface>
-              <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
-                <div style={{ fontWeight: 900 }}>Post Notice</div>
-                <div style={{ ...styles.small, display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <IconInfo /> Image opens link on click • Script injects into notice area
-                </div>
-              </div>
-
+            {/* Post Notice */}
+            <Surface title="Post Notice" sub="Image or Script • optional expiry (minutes)">
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 8, marginBottom: 8 }}>
                 <button
-                  style={{ ...styles.buttonGhost, ...(noticeType === 'image' ? { borderColor: colors.accent } : {}) }}
-                  onClick={() => setNoticeType('image')}
+                  style={{ ...styles.buttonGhost, ...(postTab === 'image' ? { borderColor: colors.accent } : {}) }}
+                  onClick={() => setPostTab('image')}
                 >
                   Image
                 </button>
                 <button
-                  style={{ ...styles.buttonGhost, ...(noticeType === 'script' ? { borderColor: colors.accent } : {}) }}
-                  onClick={() => setNoticeType('script')}
+                  style={{ ...styles.buttonGhost, ...(postTab === 'script' ? { borderColor: colors.accent } : {}) }}
+                  onClick={() => setPostTab('script')}
                 >
                   Script
                 </button>
               </div>
 
-              <div style={styles.row}>
-                <div>
-                  <div style={{ ...styles.small, marginBottom: 4 }}>Title (optional)</div>
-                  <input style={styles.input} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Enter title" />
+              {postTab === 'image' ? (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 8 }}>
+                  <div>
+                    <div style={{ ...styles.small, marginBottom: 4 }}>Image URL</div>
+                    <input style={styles.input} value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="https://..." />
+                  </div>
+                  <div>
+                    <div style={{ ...styles.small, marginBottom: 4 }}>Link URL (open on click)</div>
+                    <input style={styles.input} value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} placeholder="https://..." />
+                  </div>
+                  <div>
+                    <div style={{ ...styles.small, marginBottom: 4 }}>Expires in (minutes) — leave blank to keep</div>
+                    <input style={styles.input} value={expireMinutes} onChange={(e) => setExpireMinutes(e.target.value)} placeholder="e.g., 60" />
+                  </div>
+                  <div>
+                    <button className="lxr-buy-btn" onClick={onPostNotice} disabled={isPosting}>
+                      {isPosting ? 'POSTING...' : 'Post Image Notice'}
+                    </button>
+                  </div>
                 </div>
-              </div>
-
-              {noticeType === 'image' ? (
-                <>
-                  <div style={styles.row}>
-                    <div>
-                      <div style={{ ...styles.small, marginBottom: 4 }}>Image upload</div>
-                      <input type="file" accept="image/*" onChange={(e) => onPickImage(e.target.files?.[0] || null)} />
-                    </div>
-                    <div>
-                      <div style={{ ...styles.small, marginBottom: 4 }}>Or Image URL</div>
-                      <input style={styles.input} value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="https://..." />
-                    </div>
-                  </div>
-                  <div style={styles.row}>
-                    <div>
-                      <div style={{ ...styles.small, marginBottom: 4 }}>Link URL (optional)</div>
-                      <input style={styles.input} value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} placeholder="https://..." />
-                    </div>
-                  </div>
-                </>
               ) : (
-                <div style={styles.row}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 8 }}>
                   <div>
                     <div style={{ ...styles.small, marginBottom: 4 }}>Script content</div>
                     <textarea
                       style={styles.textarea}
                       value={scriptContent}
                       onChange={(e) => setScriptContent(e.target.value)}
-                      placeholder={`console.log('Hello from admin script');`}
+                      placeholder={`console.log('Hello');`}
                     />
+                  </div>
+                  <div>
+                    <div style={{ ...styles.small, marginBottom: 4 }}>Expires in (minutes) — leave blank to keep</div>
+                    <input style={styles.input} value={expireMinutes} onChange={(e) => setExpireMinutes(e.target.value)} placeholder="e.g., 120" />
+                  </div>
+                  <div>
+                    <button className="lxr-buy-btn" onClick={onPostNotice} disabled={isPosting}>
+                      {isPosting ? 'POSTING...' : 'Post Script Notice'}
+                    </button>
                   </div>
                 </div>
               )}
-
-              <div style={{ marginTop: 8 }}>
-                <button className="lxr-buy-btn" onClick={postNotice} disabled={isPosting}>
-                  {isPosting ? 'POSTING...' : 'Post Notice'}
-                </button>
-              </div>
             </Surface>
 
-            {/* Analysis */}
-            <Surface>
-              <div style={{ fontWeight: 900, marginBottom: 6 }}>Analysis</div>
-              <div style={{ marginBottom: 10, ...styles.small }}>
-                Total users: <strong style={{ color: colors.accent }}>{totalUsers}</strong>
-                {typeof totalCoins === 'number' ? (
-                  <> • Total coins: <strong style={{ color: colors.accent }}>{Number(totalCoins).toFixed(0)}</strong></>
-                ) : null}
-              </div>
-
+            {/* Manage Notices */}
+            <Surface title="Manage Notices" sub={isListFetching ? 'Refreshing…' : `Total: ${adminList.length}`}>
               <div style={{ overflowX: 'auto' }}>
                 <table style={styles.table}>
                   <thead>
                     <tr>
-                      <th style={styles.th}>#</th>
-                      <th style={styles.th}>User ID</th>
-                      <th style={styles.th}>Address</th>
-                      <th style={{ ...styles.th, textAlign: 'right' as const }}>Referrals</th>
+                      <th style={styles.th}>ID</th>
+                      <th style={styles.th}>Kind</th>
+                      <th style={styles.th}>Status</th>
+                      <th style={styles.th}>Preview</th>
+                      <th style={styles.th}>Expires</th>
+                      <th style={{ ...styles.th, textAlign: 'right' as const }}>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {(topRef || []).map((r, idx) => (
-                      <tr key={`${r.address || r.userId}-${idx}`}>
-                        <td style={styles.td}>{idx + 1}</td>
-                        <td style={styles.td}>{r.userId || '-'}</td>
-                        <td style={styles.td}>
-                          {r.address ? (
-                            <span title={r.address}>{r.address.slice(0, 6)}…{r.address.slice(-4)}</span>
-                          ) : (
-                            <span style={{ color: colors.textMuted }}>N/A</span>
-                          )}
-                        </td>
-                        <td style={{ ...styles.td, textAlign: 'right' }}>{r.count}</td>
-                      </tr>
-                    ))}
-                    {(!topRef || topRef.length === 0) && (
+                    {(adminList || []).map((n) => {
+                      const status = isExpired(n) ? 'Expired' : (n.is_active ? 'Active' : 'Inactive')
+                      const expires = n.expires_at ? new Date(n.expires_at).toLocaleString() : '—'
+                      const preview = n.kind === 'image' ? (n.image_url || '').slice(0, 32) : (n.content_html || '').slice(0, 32)
+                      return (
+                        <tr key={n.id}>
+                          <td style={styles.td}>{n.id}</td>
+                          <td style={styles.td}>{n.kind}</td>
+                          <td style={styles.td} title={status} >
+                            <span style={{ color: isExpired(n) ? colors.textMuted : colors.accent, fontWeight: 800 }}>{status}</span>
+                          </td>
+                          <td style={styles.td} title={n.kind === 'image' ? (n.image_url || '') : ''}>{preview || '—'}</td>
+                          <td style={styles.td}>{expires}</td>
+                          <td style={{ ...styles.td, textAlign: 'right' }}>
+                            <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
+                              <QuickExpiry id={n.id} onSet={(mins) => setExpiryMinutes(n.id, mins)} />
+                              <button style={styles.buttonDanger} onClick={() => deleteOne(n.id)}>Delete</button>
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                    {(!adminList || adminList.length === 0) && (
                       <tr>
-                        <td colSpan={4} style={{ ...styles.td, color: colors.textMuted }}>No data</td>
+                        <td colSpan={6} style={{ ...styles.td, color: colors.textMuted }}>No notices</td>
                       </tr>
                     )}
                   </tbody>
@@ -496,43 +488,40 @@ Timestamp: ${ts}`
           </div>
         ) : (
           <div style={styles.grid}>
-            {/* Finance */}
-            <Surface>
-              <div style={{ fontWeight: 900, marginBottom: 6 }}>Finance</div>
-              <div style={{ display: 'grid', gap: 8 }}>
-                <div style={styles.small}>
-                  Total Commission: <strong style={{ color: colors.accent }}>${Number(finance?.commission || 0).toFixed(2)}</strong>
-                </div>
-                <div>
-                  <button className="lxr-buy-btn" onClick={handleWithdrawCommission}>Withdraw Commission</button>
-                </div>
+            {/* Finance cards laid out separately */}
+            <Surface title="Total Commission">
+              <div style={{ ...styles.small, marginBottom: 8 }}>
+                <strong style={{ color: colors.accent }}>${Number(finance?.commission || 0).toFixed(2)}</strong>
+              </div>
+              <button className="lxr-buy-btn" onClick={handleWithdrawCommission}>Withdraw Commission</button>
+            </Surface>
 
-                <div style={styles.small}>
-                  Contract Balance: <strong style={{ color: colors.accent }}>${Number(finance?.balance || 0).toFixed(2)}</strong>
-                </div>
-                <div>
-                  <button style={styles.buttonDanger} onClick={handleEmergencyWithdrawAll}>Emergency Withdraw All</button>
-                </div>
+            <Surface title="Contract Balance">
+              <div style={{ ...styles.small, marginBottom: 8 }}>
+                <strong style={{ color: colors.accent }}>${Number(finance?.balance || 0).toFixed(2)}</strong>
+              </div>
+              <button style={styles.buttonDanger} onClick={handleEmergencyWithdrawAll}>Emergency Withdraw All</button>
+            </Surface>
 
-                <div style={styles.small}>
-                  Total Liquidity (miners): <strong style={{ color: colors.accent }}>${Number(finance?.totalCollected || 0).toFixed(2)}</strong>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 8 }}>
-                  <input
-                    style={styles.input}
-                    placeholder="Enter amount in USDT"
-                    value={liqAmount}
-                    onChange={(e) => setLiqAmount(e.target.value)}
-                  />
-                  <button className="lxr-buy-btn" onClick={handleWithdrawLiquidity}>Withdraw Liquidity</button>
-                </div>
+            <Surface title="Total Liquidity (miners)">
+              <div style={{ ...styles.small, marginBottom: 8 }}>
+                <strong style={{ color: colors.accent }}>${Number(finance?.totalCollected || 0).toFixed(2)}</strong>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 8 }}>
+                <input
+                  style={styles.input}
+                  placeholder="Enter amount in USDT"
+                  value={liqAmount}
+                  onChange={(e) => setLiqAmount(e.target.value)}
+                />
+                <button className="lxr-buy-btn" onClick={handleWithdrawLiquidity}>Withdraw Liquidity</button>
               </div>
             </Surface>
           </div>
         )}
       </div>
 
-      {/* Bottom nav */}
+      {/* Bottom nav only */}
       <div style={styles.bottomNavWrap}>
         <div className="lxr-surface" style={{ padding: 8, borderRadius: 14 }}>
           <div className="lxr-surface-lines" />
@@ -561,7 +550,32 @@ Timestamp: ${ts}`
           </div>
         </div>
       </div>
-      {/* End bottom nav */}
+    </div>
+  )
+}
+
+const QuickExpiry: React.FC<{ id: number; onSet: (mins: number) => void }> = ({ id, onSet }) => {
+  const [mins, setMins] = useState<string>('')
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <input
+        style={{ height: 34, borderRadius: 8, border: '2px solid rgba(20,184,166,0.3)', padding: '0 8px', background: 'rgba(255,255,255,0.05)', color: colors.text, width: 90 }}
+        placeholder="mins"
+        value={mins}
+        onChange={(e) => setMins(e.target.value)}
+      />
+      <button
+        style={{ height: 34, borderRadius: 8, border: 'none', cursor: 'pointer', padding: '0 10px', fontWeight: 800, background: `linear-gradient(45deg, ${colors.accent}, ${colors.accentSoft})`, color: '#0b1b3b' }}
+        onClick={() => {
+          const v = Number(mins || '0')
+          if (!Number.isFinite(v) || v <= 0) { showErrorToast('Enter minutes > 0'); return }
+          onSet(v)
+          setMins('')
+        }}
+      >
+        Set expiry
+      </button>
     </div>
   )
 }
