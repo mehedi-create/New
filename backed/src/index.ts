@@ -97,7 +97,6 @@ async function ensureSchema(db: D1Database) {
   ]
   await db.batch(stmts.map((sql) => db.prepare(sql)))
 
-  // migrations (ignore if exists)
   try { await db.prepare(`ALTER TABLE users ADD COLUMN coin_balance INTEGER DEFAULT 0`).run() } catch {}
   try { await db.prepare(`ALTER TABLE notices ADD COLUMN kind TEXT DEFAULT 'text'`).run() } catch {}
   try { await db.prepare(`ALTER TABLE notices ADD COLUMN expires_at TEXT`).run() } catch {}
@@ -113,8 +112,11 @@ const PLATFORM_ABI = [
   'function addressToUserId(address) view returns (string)',
   'function referrerOf(address) view returns (address)',
   'function owner() view returns (address)',
+  'function usdtToken() view returns (address)',
   'event MinerPurchased(address indexed user, uint256 amount, uint256 startTime, uint256 endTime)',
 ]
+const ERC20_ABI = ['function decimals() view returns (uint8)']
+
 const MINER_PURCHASED_TOPIC = ethers.id('MinerPurchased(address,uint256,uint256,uint256)')
 const IFACE = new Interface(PLATFORM_ABI)
 
@@ -125,6 +127,46 @@ function getProvider(env: Bindings): JsonRpcProvider {
 }
 function getContract(env: Bindings, provider: JsonRpcProvider) {
   return new Contract(env.CONTRACT_ADDRESS, PLATFORM_ABI, provider)
+}
+
+// cache: token decimals (per worker lifetime)
+let DECIMALS_CACHE: number | null = null
+let USDT_ADDR_CACHE: string | null = null
+
+async function getTokenDecimals(env: Bindings): Promise<{ address: string; decimals: number }> {
+  if (DECIMALS_CACHE && USDT_ADDR_CACHE) {
+    return { address: USDT_ADDR_CACHE!, decimals: DECIMALS_CACHE! }
+  }
+  const provider = getProvider(env)
+  const platform = getContract(env, provider)
+  let usdtAddr = ''
+  try { usdtAddr = await platform.usdtToken() } catch {}
+  if (!usdtAddr || usdtAddr === ethers.ZeroAddress) {
+    // fallback (BNB Testnet common case is 18)
+    DECIMALS_CACHE = 18
+    USDT_ADDR_CACHE = usdtAddr || ethers.ZeroAddress
+    return { address: USDT_ADDR_CACHE, decimals: DECIMALS_CACHE }
+  }
+  const erc20 = new Contract(usdtAddr, ERC20_ABI, provider)
+  let dec = 18
+  try { dec = Number(await erc20.decimals()) || 18 } catch {}
+  DECIMALS_CACHE = dec
+  USDT_ADDR_CACHE = usdtAddr
+  return { address: usdtAddr, decimals: dec }
+}
+
+function todayISODate() {
+  return new Date().toISOString().slice(0, 10)
+}
+function isoDateFromUnix(sec: number) {
+  return new Date(sec * 1000).toISOString().slice(0, 10)
+}
+function daysBetweenInclusive(startDate: string, endDate: string) {
+  const a = new Date(`${startDate}T00:00:00Z`).getTime()
+  const b = new Date(`${endDate}T00:00:00Z`).getTime()
+  if (isNaN(a) || isNaN(b)) return 0
+  const diffDays = Math.floor((b - a) / (24 * 3600 * 1000))
+  return diffDays < 0 ? 0 : diffDays + 1
 }
 
 // ---------- Sign/Verify helpers ----------
@@ -164,31 +206,11 @@ async function upsertDbUser(
                   user_id = excluded.user_id,
                   referrer_id = excluded.referrer_id,
                   is_active = 1`
-  await db
-    .prepare(stmt)
-    .bind(
-      payload.userId.toUpperCase(),
-      payload.walletAddress.toLowerCase(),
-      payload.referrerId?.toUpperCase() || '',
-    )
+  await db.prepare(stmt)
+    .bind(payload.userId.toUpperCase(), payload.walletAddress.toLowerCase(), payload.referrerId?.toUpperCase() || '')
     .run()
 }
 
-function todayISODate() {
-  return new Date().toISOString().slice(0, 10)
-}
-function isoDateFromUnix(sec: number) {
-  return new Date(sec * 1000).toISOString().slice(0, 10)
-}
-function daysBetweenInclusive(startDate: string, endDate: string) {
-  const a = new Date(`${startDate}T00:00:00Z`).getTime()
-  const b = new Date(`${endDate}T00:00:00Z`).getTime()
-  if (isNaN(a) || isNaN(b)) return 0
-  const diffDays = Math.floor((b - a) / (24 * 3600 * 1000))
-  return diffDays < 0 ? 0 : diffDays + 1
-}
-
-// ---------- Chain profile helpers ----------
 async function getChainProfile(env: Bindings, address: string): Promise<{ userId: string; referrerId: string; referrerAddr?: string } | null> {
   const provider = getProvider(env)
   const contract = getContract(env, provider)
@@ -207,27 +229,56 @@ async function getChainProfile(env: Bindings, address: string): Promise<{ userId
 
 async function ensureUserInDb(env: Bindings, address: string) {
   const lower = address.toLowerCase()
-  const exists = await env.DB
-    .prepare('SELECT 1 FROM users WHERE wallet_address = ?')
-    .bind(lower)
-    .first()
+  const exists = await env.DB.prepare('SELECT 1 FROM users WHERE wallet_address = ?').bind(lower).first()
   if (exists) return true
   const profile = await getChainProfile(env, address)
   if (!profile) return false
-  await upsertDbUser(env.DB, {
-    walletAddress: address,
-    userId: profile.userId,
-    referrerId: profile.referrerId || '',
-  })
+  await upsertDbUser(env.DB, { walletAddress: address, userId: profile.userId, referrerId: profile.referrerId || '' })
   return true
 }
 
 // ---------- Mining helpers ----------
-async function creditMiningIfDue(db: D1Database, walletLower: string) {
+async function computeDailyCoins(env: Bindings, amountRaw: bigint): Promise<number> {
+  const { decimals } = await getTokenDecimals(env)
+  const units = ethers.formatUnits(amountRaw, decimals) // string like "5.0"
+  // Business rule: per day coins == invested USDT (integer)
+  const val = Math.floor(Number(units))
+  return isFinite(val) && val > 0 ? val : 0
+}
+
+async function normalizePurchaseRowIfNeeded(env: Bindings, row: { id: number; tx_hash: string; daily_coins: number }): Promise<number> {
+  const weird = !row.daily_coins || row.daily_coins <= 0 || row.daily_coins > 100000
+  if (!weird) return row.daily_coins
+  if (!row.tx_hash) return row.daily_coins
+
+  try {
+    const provider = getProvider(env)
+    const receipt = await provider.getTransactionReceipt(row.tx_hash)
+    if (!receipt || receipt.status !== 1) return row.daily_coins
+    const contractAddr = ethers.getAddress(env.CONTRACT_ADDRESS)
+    const log = (receipt.logs || []).find((lg: any) =>
+      lg.address && ethers.getAddress(lg.address) === contractAddr &&
+      lg.topics && lg.topics[0] === MINER_PURCHASED_TOPIC
+    )
+    if (!log) return row.daily_coins
+    const parsed = IFACE.parseLog({ topics: log.topics, data: log.data })
+    const amountRaw = BigInt(parsed.args.amount.toString())
+    const corrected = await computeDailyCoins(env, amountRaw)
+    if (corrected > 0) {
+      await env.DB.prepare('UPDATE mining_purchases SET daily_coins = ? WHERE id = ?').bind(corrected, row.id).run()
+      return corrected
+    }
+  } catch (e) {
+    console.warn('normalizePurchaseRowIfNeeded failed:', (e as any)?.message || e)
+  }
+  return row.daily_coins
+}
+
+async function creditMiningIfDue(db: D1Database, walletLower: string, env?: Bindings) {
   const res = await db
-    .prepare('SELECT id, daily_coins, total_days, credited_days, start_date FROM mining_purchases WHERE wallet_address = ?')
+    .prepare('SELECT id, tx_hash, daily_coins, total_days, credited_days, start_date FROM mining_purchases WHERE wallet_address = ?')
     .bind(walletLower)
-    .all<{ id: number; daily_coins: number; total_days: number; credited_days: number; start_date: string }>()
+    .all<{ id: number; tx_hash: string; daily_coins: number; total_days: number; credited_days: number; start_date: string }>()
   const rows = res.results || []
   if (!rows.length) return { credited_coins: 0 }
 
@@ -235,7 +286,13 @@ async function creditMiningIfDue(db: D1Database, walletLower: string) {
   let totalCoinDelta = 0
   const updates: D1PreparedStatement[] = []
 
-  for (const r of rows) {
+  for (const r0 of rows) {
+    let r = { ...r0 }
+    // try auto-normalize if weird and env provided
+    if (env) {
+      r.daily_coins = await normalizePurchaseRowIfNeeded(env, { id: r.id, tx_hash: r.tx_hash, daily_coins: r.daily_coins })
+    }
+
     const maxDays = Math.max(0, Number(r.total_days || 30))
     const creditedDays = Math.max(0, Number(r.credited_days || 0))
     const dailyCoins = Math.max(0, Number(r.daily_coins || 0))
@@ -271,7 +328,8 @@ async function creditMiningIfDue(db: D1Database, walletLower: string) {
 app.get('/api/debug/rpc', async (c) => {
   try {
     const net = await getProvider(c.env).getNetwork()
-    return c.json({ ok: true, chainId: Number(net.chainId), contract: c.env.CONTRACT_ADDRESS })
+    const decInfo = await getTokenDecimals(c.env)
+    return c.json({ ok: true, chainId: Number(net.chainId), contract: c.env.CONTRACT_ADDRESS, usdt: decInfo })
   } catch (e: any) {
     return c.json({ ok: false, error: e?.message || 'rpc error' }, 500)
   }
@@ -419,7 +477,7 @@ app.post('/api/users/:address/login', async (c) => {
       ])
     }
 
-    const miningRes = await creditMiningIfDue(c.env.DB, lower)
+    const miningRes = await creditMiningIfDue(c.env.DB, lower, c.env)
 
     const row = await c.env.DB
       .prepare('SELECT COUNT(*) AS cnt FROM logins WHERE wallet_address = ?')
@@ -439,7 +497,7 @@ app.post('/api/users/:address/login', async (c) => {
   }
 })
 
-// Record mining purchase (signed) — verify tx log → save purchase
+// Record mining purchase (signed) — verify tx log → save purchase with correct decimals
 app.post('/api/mining/record-purchase', async (c) => {
   try {
     const body = await c.req.json<{ address: string; tx_hash: string; timestamp: number; signature: string }>()
@@ -482,12 +540,7 @@ app.post('/api/mining/record-purchase', async (c) => {
       return c.json({ error: 'Event user mismatch' }, 400)
     }
 
-    // NB: এখানে daily_coins == USD amount per day ধারণা অনুযায়ী সেভ করছি
-    // (USDT decimals issue আলাদা ফিক্সে করা হবে)
-    const dailyCoins = Number(amountRaw / 10n ** 18n) > 0
-      ? Number(amountRaw / 10n ** 18n)
-      : Number(amountRaw / 10n ** 6n)
-
+    const dailyCoins = await computeDailyCoins(c.env, amountRaw)
     const startDate = isoDateFromUnix(startTime)
 
     const ok = await ensureUserInDb(c.env, address)
@@ -499,7 +552,8 @@ app.post('/api/mining/record-purchase', async (c) => {
       .bind(lower, tx_hash, Math.max(0, dailyCoins), startDate)
       .run()
 
-    const miningRes = await creditMiningIfDue(c.env.DB, lower)
+    // Immediate catch-up (uses env for auto-normalize later too)
+    const miningRes = await creditMiningIfDue(c.env.DB, lower, c.env)
 
     return c.json({ ok: true, daily_coins: dailyCoins, credited_now: miningRes.credited_coins || 0 })
   } catch (e: any) {
@@ -517,7 +571,7 @@ app.get('/api/stats/:address', async (c) => {
     const lower = address.toLowerCase()
 
     await ensureUserInDb(c.env, address)
-    await creditMiningIfDue(c.env.DB, lower)
+    await creditMiningIfDue(c.env.DB, lower, c.env)
 
     const user = await c.env.DB
       .prepare('SELECT user_id, coin_balance FROM users WHERE wallet_address = ?')
@@ -744,23 +798,22 @@ app.get('/api/admin/notices', async (c) => {
   }
 })
 
-// ---------- Mining: history (NEW) ----------
+// ---------- Mining: history (DB) ----------
 app.get('/api/mining/history/:address', async (c) => {
   try {
     const { address } = c.req.param()
     if (!ethers.isAddress(address)) return c.json({ error: 'Invalid wallet address' }, 400)
     const lower = address.toLowerCase()
 
-    // ensure user exists silently (optional)
     await ensureUserInDb(c.env, address)
 
     const res = await c.env.DB
-      .prepare(`SELECT tx_hash, daily_coins, total_days, credited_days, start_date
+      .prepare(`SELECT id, tx_hash, daily_coins, total_days, credited_days, start_date
                 FROM mining_purchases
                 WHERE wallet_address = ?
                 ORDER BY id DESC`)
       .bind(lower)
-      .all<{ tx_hash: string; daily_coins: number; total_days: number; credited_days: number; start_date: string }>()
+      .all<{ id: number; tx_hash: string; daily_coins: number; total_days: number; credited_days: number; start_date: string }>()
 
     const items = (res.results || []).map((r) => {
       const start = new Date(`${r.start_date}T00:00:00Z`).getTime()
@@ -784,6 +837,93 @@ app.get('/api/mining/history/:address', async (c) => {
     return c.json({ items })
   } catch (e: any) {
     console.error('GET /api/mining/history/:address error:', e?.stack || e?.message || e)
+    return c.json({ error: 'Server error' }, 500)
+  }
+})
+
+// ---------- Admin tools: normalize & recalc ----------
+app.post('/api/admin/normalize-wallet-mining', async (c) => {
+  try {
+    const body = await c.req.json<{ address: string; timestamp: number; signature: string; wallet: string }>()
+    const { address, timestamp, signature, wallet } = body || ({} as any)
+    if (!ethers.isAddress(address) || !ethers.isAddress(wallet)) return c.json({ error: 'Invalid address' }, 400)
+    if (!timestamp || !signature) return c.json({ error: 'Missing auth' }, 400)
+
+    const msg = `Admin action authorization
+Purpose: normalize_wallet_mining
+Address: ${ethers.getAddress(address)}
+Timestamp: ${Number(timestamp)}`
+    await verifySignedMessage(address, msg, signature)
+    await requireOwner(c.env, address)
+
+    const lower = wallet.toLowerCase()
+    const rows = await c.env.DB
+      .prepare('SELECT id, tx_hash, daily_coins FROM mining_purchases WHERE wallet_address = ? ORDER BY id ASC')
+      .bind(lower).all<{ id: number; tx_hash: string; daily_coins: number }>()
+    let fixed = 0
+    for (const r of (rows.results || [])) {
+      const before = r.daily_coins
+      const after = await normalizePurchaseRowIfNeeded(c.env, r)
+      if (after !== before) fixed++
+    }
+    return c.json({ ok: true, fixed })
+  } catch (e: any) {
+    console.error('POST /api/admin/normalize-wallet-mining error:', e?.stack || e?.message || e)
+    return c.json({ error: 'Server error' }, 500)
+  }
+})
+
+app.post('/api/admin/recalc-user-coins', async (c) => {
+  try {
+    const body = await c.req.json<{ address: string; timestamp: number; signature: string; wallet: string }>()
+    const { address, timestamp, signature, wallet } = body || ({} as any)
+    if (!ethers.isAddress(address) || !ethers.isAddress(wallet)) return c.json({ error: 'Invalid address' }, 400)
+    if (!timestamp || !signature) return c.json({ error: 'Missing auth' }, 400)
+
+    const msg = `Admin action authorization
+Purpose: recalc_user_coins
+Address: ${ethers.getAddress(address)}
+Timestamp: ${Number(timestamp)}`
+    await verifySignedMessage(address, msg, signature)
+    await requireOwner(c.env, address)
+
+    const lower = wallet.toLowerCase()
+    await ensureUserInDb(c.env, wallet)
+
+    // normalize weird rows first
+    const rws = await c.env.DB
+      .prepare('SELECT id, tx_hash, daily_coins FROM mining_purchases WHERE wallet_address = ? ORDER BY id ASC')
+      .bind(lower).all<{ id: number; tx_hash: string; daily_coins: number }>()
+    for (const r of (rws.results || [])) {
+      await normalizePurchaseRowIfNeeded(c.env, r)
+    }
+
+    const userRow = await c.env.DB.prepare('SELECT user_id FROM users WHERE wallet_address = ?').bind(lower).first<{ user_id: string }>()
+    const uid = userRow?.user_id || ''
+
+    const loginCntRow = await c.env.DB.prepare('SELECT COUNT(*) AS cnt FROM logins WHERE wallet_address = ?').bind(lower).first<{ cnt: number }>()
+    const loginCoins = Number(loginCntRow?.cnt || 0)
+
+    const refSumRow = await c.env.DB.prepare('SELECT SUM(reward_coins) AS sum FROM referral_rewards WHERE referrer_id = ?').bind(uid).first<{ sum: number }>()
+    const referralCoins = Number(refSumRow?.sum || 0)
+
+    const miningRows = await c.env.DB
+      .prepare('SELECT daily_coins, credited_days FROM mining_purchases WHERE wallet_address = ?')
+      .bind(lower).all<{ daily_coins: number; credited_days: number }>()
+    let miningCoins = 0
+    for (const r of (miningRows.results || [])) {
+      const d = Math.max(0, Number(r.daily_coins || 0))
+      const cd = Math.max(0, Number(r.credited_days || 0))
+      miningCoins += d * cd
+    }
+
+    const total = loginCoins + referralCoins + miningCoins
+
+    await c.env.DB.prepare('UPDATE users SET coin_balance = ? WHERE wallet_address = ?').bind(total, lower).run()
+
+    return c.json({ ok: true, components: { loginCoins, referralCoins, miningCoins }, coin_balance: total })
+  } catch (e: any) {
+    console.error('POST /api/admin/recalc-user-coins error:', e?.stack || e?.message || e)
     return c.json({ error: 'Server error' }, 500)
   }
 })
