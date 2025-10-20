@@ -32,7 +32,6 @@ const styles: Record<string, React.CSSProperties> = {
 
   body: { minHeight: 140, display: 'grid', placeItems: 'center', padding: 10 },
   img: { maxWidth: '100%', maxHeight: 180, display: 'block', borderRadius: 10, border: `1px solid ${colors.grayLine}` },
-  textBox: { width: '100%', color: colors.text, fontSize: 14, lineHeight: 1.45 },
   placeholder: { width: '100%', height: 140, borderRadius: 10, background: 'rgba(255,255,255,0.06)', border: `1px solid ${colors.grayLine}` },
 
   iframeBox: { width: '100%', height: 180, border: 'none' },
@@ -81,7 +80,6 @@ const NoticeCarousel: React.FC<{ autoIntervalMs?: number; limit?: number }> = ({
   const notices = useMemo(() => (data?.notices || []), [data])
   const count = notices.length
 
-  // no notices → hide block
   if (!isLoading && count === 0) return null
 
   const [index, setIndex] = useState(0)
@@ -117,21 +115,26 @@ const NoticeCarousel: React.FC<{ autoIntervalMs?: number; limit?: number }> = ({
 
   const active = notices[index]
 
-  // Prepare sandboxed iframe document for script notices
-  const scriptHtml = useMemo(() => {
-    if (!active || active.kind !== 'script') return ''
-    const content = String(active.content_html || '')
-    // wrap into minimal HTML; disallow navigation, keep transparent bg
-    return `<!doctype html>
+  const buildIframeHtml = (content: string) => `<!doctype html>
 <html>
   <head>
     <meta charset="utf-8" />
     <style>html,body{margin:0;padding:0;background:transparent;color:#fff;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial}</style>
   </head>
   <body>
-    ${content}
+    ${content || ''}
   </body>
 </html>`
+
+  const scriptHtml = useMemo(() => {
+    if (!active || active.kind !== 'script') return ''
+    return buildIframeHtml(String(active.content_html || ''))
+  }, [active])
+
+  const textHtml = useMemo(() => {
+    if (!active || active.kind !== 'text') return ''
+    // Note: text content intentionally kept inside iframe to isolate any CSS
+    return buildIframeHtml(String(active.content_html || ''))
   }, [active])
 
   return (
@@ -166,23 +169,26 @@ const NoticeCarousel: React.FC<{ autoIntervalMs?: number; limit?: number }> = ({
                     <img src={active.image_url} alt={active.title || 'notice'} style={styles.img} />
                   </a>
                 ) : (
-                  <div style={styles.textBox}>Invalid image notice</div>
+                  <div style={{ color: colors.textMuted }}>Invalid image notice</div>
                 )
               ) : active.kind === 'text' ? (
-                <div
-                  style={styles.textBox}
-                  dangerouslySetInnerHTML={{ __html: active.content_html || '' }}
+                <iframe
+                  key={`text-${active.id}`}
+                  title={`notice-text-${active.id}`}
+                  sandbox="allow-popups"
+                  srcDoc={textHtml}
+                  style={styles.iframeBox}
                 />
               ) : active.kind === 'script' ? (
-                // IMPORTANT: sandboxed iframe to prevent breaking the app
                 <iframe
-                  title={`notice-${active.id}`}
-                  sandbox="allow-scripts"
+                  key={`script-${active.id}`}
+                  title={`notice-script-${active.id}`}
+                  sandbox="allow-scripts allow-popups"
                   srcDoc={scriptHtml}
                   style={styles.iframeBox}
                 />
               ) : (
-                <div style={styles.textBox}>Unsupported notice</div>
+                <div style={{ color: colors.textMuted }}>Unsupported notice</div>
               )
             ) : null}
           </div>
