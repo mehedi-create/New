@@ -89,6 +89,19 @@ export type UpdateNoticePayload = Partial<Omit<CreateNoticePayload, 'kind'>> & {
   kind?: 'image' | 'script'
 }
 
+// Mining history (backend DB)
+export type MiningHistoryItem = {
+  tx_hash: string
+  amount_usd: number
+  daily_coins: number
+  start_date: string // YYYY-MM-DD (UTC)
+  total_days: number
+  credited_days: number
+  end_date: string // YYYY-MM-DD (UTC)
+  active: boolean
+  days_left: number
+}
+
 // ---------------- Health ----------------
 export const getHealth = () => api.get('/api/health')
 
@@ -118,7 +131,6 @@ export const markLoginSmart = async (address: string) => {
   } catch (e: any) {
     const status = e?.response?.status || e?.status
     if (status === 404) {
-      // user missing → upsert then retry
       await upsertUserFromChain(address, timestamp, signature)
       await markLogin(address, timestamp, signature)
       return { ok: true }
@@ -142,6 +154,10 @@ export const recordMiningPurchase = async (address: string, txHash: string) => {
     )
   )
 }
+
+// Mining history (NEW)
+export const getMiningHistory = (address: string) =>
+  api.get<{ items: MiningHistoryItem[] }>(`/api/mining/history/${address}`)
 
 // ---------------- Public Notices ----------------
 export const getNotices = (params?: { limit?: number; active?: 0 | 1 }) =>
@@ -187,7 +203,7 @@ export const getUserBootstrap = async (address: string) => {
 // ---------------- Ensure profile (optional helper) ----------------
 export const ensureUserProfile = async (address: string) => {
   try {
-    await getStats(address)
+    await getStats(address) // exists → ok
     return { ensured: true, existed: true }
   } catch (e: any) {
     const status = e?.response?.status || e?.status
