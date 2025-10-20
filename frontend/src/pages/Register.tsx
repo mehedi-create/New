@@ -1,11 +1,12 @@
-// frontend/src/pages/Register.tsx
 import React, { useState, useEffect } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
+import { BrowserProvider, Contract, parseUnits } from 'ethers'
 import { useWallet } from '../context/WalletContext'
 import { approveUSDT, registerUser, signAuthMessage } from '../utils/contract'
 import { upsertUserFromChain } from '../services/api'
 import { showSuccessToast, showErrorToast } from '../utils/notification'
 import { isValidAddress } from '../utils/wallet'
+import { config } from '../config'
 
 const colors = {
   accent: '#14b8a6',
@@ -63,6 +64,7 @@ const styles: Record<string, Style> = {
     fontWeight: 800,
     cursor: 'pointer',
     boxShadow: '0 6px 18px rgba(20,184,166,0.3)',
+    transition: 'background .2s ease, opacity .2s ease',
   },
   buttonDisabled: { opacity: 0.65, cursor: 'not-allowed' },
 
@@ -135,6 +137,11 @@ const Surface: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   </div>
 )
 
+// Minimal ERC20 ABI for allowance check
+const ERC20_ABI = [
+  'function allowance(address owner, address spender) view returns (uint256)',
+]
+
 const Register: React.FC = () => {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
@@ -178,7 +185,7 @@ const Register: React.FC = () => {
     }
   }, [])
 
-  // Validate inputs (6–8 chars)
+  // Validate inputs (6–8 chars, fund code)
   useEffect(() => {
     const uidLen = userId.trim().length
     const refLen = referralCode.trim().length
@@ -189,6 +196,20 @@ const Register: React.FC = () => {
       fundCode === confirmFundCode
     setIsFormValid(valid)
   }, [userId, referralCode, fundCode, confirmFundCode])
+
+  // Helper: check allowance; returns true if allowance >= fee
+  const hasSufficientAllowance = async (owner: string, spender: string, feeStr: string) => {
+    try {
+      const provider = new BrowserProvider((window as any).ethereum)
+      const usdt = new Contract(config.usdtAddress, ERC20_ABI, provider)
+      const allowance: bigint = await (usdt as any).allowance(owner, spender)
+      const need = parseUnits(feeStr, config.usdtDecimals)
+      return allowance >= need
+    } catch {
+      // If cannot read allowance, fallback to approve path
+      return false
+    }
+  }
 
   const handleRegister = async () => {
     if (!isValidAddress(account)) {
@@ -202,21 +223,27 @@ const Register: React.FC = () => {
 
     setIsProcessing(true)
     try {
-      // 1) Approve USDT (fixed 12 USDT)
-      setLoadingMessage(`Preparing payment of ${fee} USDT... (Approval)`)
-      const approveTx = await approveUSDT(fee)
-      await approveTx.wait()
+      // 0) Check allowance first — যদি পর্যাপ্ত থাকে, approve স্কিপ
+      setLoadingMessage('Checking token allowance...')
+      const allowanceOk = await hasSufficientAllowance(account!, config.contractAddress, fee)
 
-      // 2) Register on-chain
+      if (!allowanceOk) {
+        setLoadingMessage(`Approving ${fee} USDT...`)
+        const approveTx = await approveUSDT(fee)
+        await (approveTx as any)?.wait?.()
+      }
+
+      // 1) Register on-chain
       setLoadingMessage('Submitting your registration...')
       const registerTx = await registerUser(
         userId.trim().toUpperCase(),
         referralCode.trim().toUpperCase(),
         fundCode
       )
-      await registerTx.wait()
+      await (registerTx as any)?.wait?.()
 
-      // 3) Upsert off-chain (signed)
+      // 2) Upsert off-chain (signed)
+      setLoadingMessage('Syncing profile (backend)...')
       const { timestamp, signature } = await signAuthMessage(account!)
       await upsertUserFromChain(account!, timestamp, signature)
 
@@ -354,7 +381,7 @@ const Register: React.FC = () => {
                 </ul>
               </div>
               <p style={{ ...styles.smallNote, marginTop: 8 }}>
-                Note: If your current smart contract still enforces a different fee or exactly 6 chars only, please update it to support 6–8 chars and 12 USDT.
+                Tip: If your USDT already approved once, you won’t see a separate approval again — it will register directly.
               </p>
             </Surface>
           </section>
