@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { getNotices } from '../services/api'
+import { config } from '../config'
 
+// Types
 type Notice = {
   id: number
   title?: string
@@ -30,9 +30,11 @@ const styles: Record<string, React.CSSProperties> = {
   title: { fontWeight: 900, fontSize: 14 },
   small: { fontSize: 12, color: colors.textMuted },
 
-  body: { minHeight: 140, display: 'grid', placeItems: 'center', padding: 10 },
-  img: { maxWidth: '100%', maxHeight: 180, display: 'block', borderRadius: 10, border: `1px solid ${colors.grayLine}` },
-  placeholder: { width: '100%', height: 140, borderRadius: 10, background: 'rgba(255,255,255,0.06)', border: `1px solid ${colors.grayLine}` },
+  body: { minHeight: 160, display: 'grid', placeItems: 'center', padding: 10 },
+  img: { maxWidth: '100%', maxHeight: 200, display: 'block', borderRadius: 10, border: `1px solid ${colors.grayLine}` },
+  placeholder: { width: '100%', height: 160, borderRadius: 10, background: 'rgba(255,255,255,0.06)', border: `1px solid ${colors.grayLine}` },
+
+  iframeBox: { width: '100%', height: 200, border: 'none' },
 
   dots: { display: 'flex', gap: 6, alignItems: 'center', justifyContent: 'center', padding: '8px 0' },
   dot: { width: 8, height: 8, borderRadius: 8, background: 'rgba(255,255,255,0.25)', cursor: 'pointer' },
@@ -48,7 +50,7 @@ const styles: Record<string, React.CSSProperties> = {
   arrowRight: { right: 8 },
 }
 
-// Local error boundary (prevents the whole page from blanking if slider crashes)
+// Local error boundary to ensure slider never breaks the page
 class SliderBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean }> {
   constructor(props: any) {
     super(props)
@@ -92,28 +94,40 @@ const IconArrow: React.FC<{ dir: 'left' | 'right'; size?: number }> = ({ dir, si
   </svg>
 )
 
-const NoticeCarousel: React.FC<{ autoIntervalMs?: number; limit?: number }> = ({ autoIntervalMs = 5000, limit = 10 }) => {
-  const { data, isLoading } = useQuery<{ notices: Notice[] }>({
-    queryKey: ['notices', limit],
-    queryFn: async () => {
-      const res = await getNotices({ limit, active: 1 })
-      return res.data
-    },
-    refetchInterval: 60_000,
-  })
+type Props = { autoIntervalMs?: number; limit?: number }
 
-  // SAFE MODE: render only image notices to avoid any chance of page breaking
-  const all = useMemo(() => (data?.notices || []), [data])
-  const notices = useMemo(
-    () => all.filter(n => n && n.kind === 'image' && (n.image_url || '').trim().length > 0),
-    [all]
-  )
-  const count = notices.length
-
-  // no image notices → hide block completely
-  if (!isLoading && count === 0) return null
-
+const NoticeCarousel: React.FC<Props> = ({ autoIntervalMs = 5000, limit = 10 }) => {
+  const [notices, setNotices] = useState<Notice[]>([])
+  const [loading, setLoading] = useState(true)
   const [index, setIndex] = useState(0)
+
+  const base = (config.apiBaseUrl || '').replace(/\/+$/, '')
+
+  // Fetch notices (no React Query; simple fetch)
+  useEffect(() => {
+    let alive = true
+    setLoading(true)
+    fetch(`${base}/api/notices?active=1&limit=${Math.min(Math.max(limit || 10, 1), 50)}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (!alive) return
+        const all: Notice[] = Array.isArray(data?.notices) ? data.notices : []
+        // Only image and script kinds are allowed (as requested)
+        const filtered = all.filter((n) =>
+          n && (n.kind === 'image' || n.kind === 'script') && ((n.kind === 'image' && (n.image_url || '').trim()) || n.kind === 'script')
+        )
+        setNotices(filtered)
+        setIndex(0)
+      })
+      .catch((e) => {
+        console.error('Failed to load notices:', e)
+        setNotices([])
+      })
+      .finally(() => alive && setLoading(false))
+    return () => { alive = false }
+  }, [base, limit])
+
+  const count = notices.length
   useEffect(() => { if (index >= count && count > 0) setIndex(0) }, [count, index])
 
   const go = (i: number) => setIndex((i + count) % count)
@@ -144,6 +158,19 @@ const NoticeCarousel: React.FC<{ autoIntervalMs?: number; limit?: number }> = ({
 
   const active = notices[index]
 
+  // Prepare iframe HTML for scripts (sandboxed)
+  const scriptHtml = useMemo(() => {
+    if (!active || active.kind !== 'script') return ''
+    const content = String(active.content_html || '')
+    return `<!doctype html>
+<html><head><meta charset="utf-8" />
+<style>html,body{margin:0;padding:0;background:transparent;color:#fff;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial}</style>
+</head><body>${content}</body></html>`
+  }, [active])
+
+  // no notices → hide block
+  if (!loading && count === 0) return null
+
   return (
     <SliderBoundary>
       <div style={styles.shell}>
@@ -157,46 +184,43 @@ const NoticeCarousel: React.FC<{ autoIntervalMs?: number; limit?: number }> = ({
           >
             <div style={styles.header}>
               <div style={styles.title}>Announcements</div>
-              {active?.created_at && (
-                <div style={styles.small}>{new Date(active.created_at).toLocaleString()}</div>
-              )}
+              {active?.created_at && <div style={styles.small}>{new Date(active.created_at).toLocaleString()}</div>}
             </div>
 
             <div style={styles.body}>
-              {isLoading ? (
+              {loading ? (
                 <div style={styles.placeholder} />
               ) : active ? (
-                active.image_url ? (
-                  <a
-                    href={active.link_url || '#'}
-                    target={active.link_url ? '_blank' : undefined}
-                    rel={active.link_url ? 'noopener noreferrer' : undefined}
-                    style={{ display: 'inline-block' }}
-                  >
-                    <img src={active.image_url} alt={active.title || 'notice'} style={styles.img} />
-                  </a>
-                ) : (
-                  <div style={{ color: colors.textMuted }}>Invalid image notice</div>
-                )
+                active.kind === 'image' ? (
+                  active.image_url ? (
+                    <a
+                      href={active.link_url || '#'}
+                      target={active.link_url ? '_blank' : undefined}
+                      rel={active.link_url ? 'noopener noreferrer' : undefined}
+                      style={{ display: 'inline-block' }}
+                    >
+                      <img src={active.image_url} alt={active.title || 'notice'} style={styles.img} />
+                    </a>
+                  ) : (
+                    <div style={{ color: colors.textMuted }}>Invalid image notice</div>
+                  )
+                ) : active.kind === 'script' ? (
+                  <iframe
+                    title={`notice-script-${active.id}`}
+                    sandbox="allow-scripts allow-popups"
+                    srcDoc={scriptHtml}
+                    style={styles.iframeBox}
+                  />
+                ) : null
               ) : null}
             </div>
 
             {count > 1 && (
               <>
-                <button
-                  type="button"
-                  aria-label="Previous"
-                  style={{ ...styles.arrow, ...styles.arrowLeft }}
-                  onClick={prev}
-                >
+                <button type="button" aria-label="Previous" style={{ ...styles.arrow, ...styles.arrowLeft }} onClick={prev}>
                   <IconArrow dir="left" />
                 </button>
-                <button
-                  type="button"
-                  aria-label="Next"
-                  style={{ ...styles.arrow, ...styles.arrowRight }}
-                  onClick={next}
-                >
+                <button type="button" aria-label="Next" style={{ ...styles.arrow, ...styles.arrowRight }} onClick={next}>
                   <IconArrow dir="right" />
                 </button>
                 <div style={styles.dots}>
