@@ -1,75 +1,54 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { config } from '../config'
 
+// Only these two kinds are allowed
 type Notice = {
   id: number
-  title?: string
-  content_html?: string
+  kind: 'image' | 'script'
   image_url?: string
   link_url?: string
-  kind?: 'image' | 'script'
-  priority?: number
+  content_html?: string
   created_at?: string
 }
 
 const colors = {
-  text: '#e8f9f1',
+  border: 'rgba(255,255,255,0.35)',
   dot: 'rgba(255,255,255,0.25)',
   dotActive: '#14b8a6',
-  border: 'rgba(255,255,255,0.35)',
 }
 
 const styles: Record<string, React.CSSProperties> = {
   shell: { background: 'transparent', border: 'none', padding: 0 },
   wrap: { position: 'relative', overflow: 'hidden', borderRadius: 16 },
 
-  // Header নেই, তাই শুধু কন্টেন্ট + ডটস
-  body: { padding: '6px 6px 0' }, // চারপাশে ন্যূনতম গ্যাপ
-  viewport: {
+  // 16:9 area (full width), the notice will occupy this whole area
+  ratioBox: {
+    position: 'relative',
     width: '100%',
-    height: 'clamp(240px, 54vw, 460px)', // মোবাইল থেকে ডেস্কটপ পর্যন্ত রেসপনসিভ
+    aspectRatio: '16 / 9', // 16:9 fixed
   },
   contentBox: {
-    width: '100%',
-    height: '100%',
-    border: `3px solid ${colors.border}`, // 3px বর্ডার
+    position: 'absolute',
+    inset: 0,
+    border: `3px solid ${colors.border}`, // 3px border as requested
     borderRadius: 12,
     overflow: 'hidden',
     background: 'rgba(0,0,0,0.35)',
     display: 'grid',
     placeItems: 'center',
   },
-  img: {
-    width: '100%',
-    height: '100%',
-    objectFit: 'cover', // ফুল-এলাকা জুড়ে
-    display: 'block',
-  },
-  iframe: {
-    width: '100%',
-    height: '100%',
-    border: 'none',
-    background: 'transparent',
-  },
+  // Fill the entire area
+  img: { width: '100%', height: '100%', objectFit: 'cover', display: 'block' },
+  iframe: { width: '100%', height: '100%', border: 'none', background: 'transparent' },
 
-  // Dots: কেবল নিচে অল্প জায়গা
-  dotsWrap: { padding: '4px 0 8px', display: 'flex', justifyContent: 'center' },
+  // Just small space for dots below
+  dotsWrap: { padding: '6px 0 8px', display: 'flex', justifyContent: 'center' },
   dots: { display: 'flex', gap: 6, alignItems: 'center' },
   dot: { width: 8, height: 8, borderRadius: 8, background: colors.dot, cursor: 'pointer' },
   dotActive: { background: colors.dotActive, width: 18 },
 }
 
-const Surface: React.FC<{ children: React.ReactNode; style?: React.CSSProperties }> = ({ children, style }) => (
-  <div className="lxr-surface" style={style}>
-    <div className="lxr-surface-lines" />
-    <div className="lxr-surface-mesh" />
-    <div className="lxr-surface-circuit" />
-    <div className="lxr-surface-holo" />
-    <div style={{ position: 'relative', zIndex: 2 }}>{children}</div>
-  </div>
-)
-
-// Error boundary যাতে স্লাইডার ফেইল করলেও পুরো পেজ ব্ল্যাঙ্ক না হয়
+// Local error boundary: the slider never crashes the page
 class SliderBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean }> {
   constructor(props: any) { super(props); this.state = { hasError: false } }
   static getDerivedStateFromError() { return { hasError: true } }
@@ -99,6 +78,7 @@ const NoticeCarousel: React.FC<{ autoIntervalMs?: number; limit?: number }> = ({
   const [loading, setLoading] = useState(true)
   const [index, setIndex] = useState(0)
 
+  // Fetch active notices (image + script only)
   useEffect(() => {
     let alive = true
     setLoading(true)
@@ -106,15 +86,29 @@ const NoticeCarousel: React.FC<{ autoIntervalMs?: number; limit?: number }> = ({
       .then((r) => r.json())
       .then((data) => {
         if (!alive) return
-        const all: Notice[] = Array.isArray(data?.notices) ? data.notices : []
-        const filtered = all.filter((n) =>
-          n && (n.kind === 'image' || n.kind === 'script') &&
-          ((n.kind === 'image' && (n.image_url || '').trim()) || (n.kind === 'script' && (n.content_html || '').trim()))
-        )
+        const all: any[] = Array.isArray(data?.notices) ? data.notices : []
+        const filtered: Notice[] = all
+          .filter((n) =>
+            n &&
+            (n.kind === 'image' || n.kind === 'script') &&
+            ((n.kind === 'image' && (n.image_url || '').trim()) ||
+              (n.kind === 'script' && (n.content_html || '').trim()))
+          )
+          .map((n) => ({
+            id: Number(n.id),
+            kind: n.kind,
+            image_url: n.image_url || '',
+            link_url: n.link_url || '',
+            content_html: n.content_html || '',
+            created_at: n.created_at || '',
+          }))
         setNotices(filtered)
         setIndex(0)
       })
-      .catch((e) => { console.error('Failed to load notices:', e); setNotices([]) })
+      .catch((e) => {
+        console.error('Failed to load notices:', e)
+        setNotices([])
+      })
       .finally(() => alive && setLoading(false))
     return () => { alive = false }
   }, [limit])
@@ -130,14 +124,14 @@ const NoticeCarousel: React.FC<{ autoIntervalMs?: number; limit?: number }> = ({
   const onEnter = () => { hoverRef.current = true }
   const onLeave = () => { hoverRef.current = false }
 
-  // Auto-slide
+  // Auto-slide (no arrows)
   useEffect(() => {
     if (count <= 1) return
     const id = setInterval(() => { if (!hoverRef.current) next() }, autoIntervalMs)
     return () => clearInterval(id)
   }, [count, index, autoIntervalMs])
 
-  // Touch swipe only (no arrows)
+  // Touch swipe only
   const touchStartX = useRef<number | null>(null)
   const onTouchStart = (e: React.TouchEvent) => { touchStartX.current = e.touches[0].clientX }
   const onTouchEnd = (e: React.TouchEvent) => {
@@ -149,19 +143,17 @@ const NoticeCarousel: React.FC<{ autoIntervalMs?: number; limit?: number }> = ({
 
   const active = notices[index]
 
-  // image fallback: first try direct url; if fails, try proxy once
+  // Image: first try direct, if fails, fallback to backend proxy (if available)
   const [imgFailedOnce, setImgFailedOnce] = useState(false)
-  useEffect(() => { setImgFailedOnce(false) }, [index, count])
-
+  useEffect(() => { setImgFailedOnce(false) }, [index])
   const buildImgSrc = (url?: string) => {
     const u = (url || '').trim()
     if (!u) return ''
-    if (!imgFailedOnce) return u // try direct first
-    // fallback to proxy (only if backend has it; onError আবার হলে কিছু করার নেই)
+    if (!imgFailedOnce) return u
     return `${BASE}/api/notice-img?src=${encodeURIComponent(u)}`
   }
 
-  // Script iframe HTML (sandboxed)
+  // Script iframe HTML
   const scriptHtml = useMemo(() => {
     if (!active || active.kind !== 'script') return ''
     const content = String(active.content_html || '')
@@ -175,71 +167,72 @@ const NoticeCarousel: React.FC<{ autoIntervalMs?: number; limit?: number }> = ({
 
   return (
     <SliderBoundary>
-      <div style={styles.shell}>
-        <Surface>
+      <div className="lxr-surface" style={{ padding: 8, borderRadius: 16 }}>
+        <div className="lxr-surface-lines" />
+        <div className="lxr-surface-mesh" />
+        <div className="lxr-surface-circuit" />
+        <div className="lxr-surface-holo" />
+        <div style={{ position: 'relative', zIndex: 2 }}>
           <div
             style={styles.wrap}
+            onMouseEnter={onEnter}
+            onMouseLeave={onLeave}
+            onTouchStart={onTouchStart}
+            onTouchEnd={onTouchEnd}
           >
-            <div
-              style={styles.body}
-              onMouseEnter={onEnter}
-              onMouseLeave={onLeave}
-              onTouchStart={onTouchStart}
-              onTouchEnd={onTouchEnd}
-            >
-              <div style={styles.viewport}>
-                <div style={styles.contentBox}>
-                  {loading ? (
-                    <div style={{ width: '100%', height: '100%', background: 'rgba(255,255,255,0.06)' }} />
-                  ) : active ? (
-                    active.kind === 'image' ? (
-                      (() => {
-                        const src = buildImgSrc(active.image_url)
-                        const img = (
-                          <img
-                            src={src}
-                            alt="notice"
-                            style={styles.img}
-                            onError={() => setImgFailedOnce(true)}
-                          />
-                        )
-                        return active.link_url ? (
-                          <a href={active.link_url} target="_blank" rel="noopener noreferrer" style={{ display: 'contents' }}>
-                            {img}
-                          </a>
-                        ) : img
-                      })()
-                    ) : (
-                      <iframe
-                        title={`notice-script-${active.id}`}
-                        sandbox="allow-scripts allow-popups"
-                        srcDoc={scriptHtml}
-                        style={styles.iframe}
-                        referrerPolicy="no-referrer"
-                      />
-                    )
-                  ) : null}
+            {/* 16:9 full area */}
+            <div style={styles.ratioBox}>
+              <div style={styles.contentBox}>
+                {loading ? (
+                  <div style={{ width: '100%', height: '100%', background: 'rgba(255,255,255,0.06)' }} />
+                ) : active ? (
+                  active.kind === 'image' ? (
+                    (() => {
+                      const src = buildImgSrc(active.image_url)
+                      const img = (
+                        <img
+                          src={src}
+                          alt="notice"
+                          style={styles.img}
+                          onError={() => setImgFailedOnce(true)}
+                        />
+                      )
+                      return active.link_url ? (
+                        <a href={active.link_url} target="_blank" rel="noopener noreferrer" style={{ display: 'contents' }}>
+                          {img}
+                        </a>
+                      ) : img
+                    })()
+                  ) : (
+                    <iframe
+                      title={`notice-script-${active.id}`}
+                      sandbox="allow-scripts allow-popups"
+                      srcDoc={scriptHtml}
+                      style={styles.iframe}
+                      referrerPolicy="no-referrer"
+                    />
+                  )
+                ) : null}
+              </div>
+            </div>
+
+            {/* Only dots below */}
+            {count > 1 && (
+              <div style={styles.dotsWrap}>
+                <div style={styles.dots}>
+                  {notices.map((_, i) => (
+                    <div
+                      key={i}
+                      style={{ ...styles.dot, ...(i === index ? styles.dotActive : {}) }}
+                      onClick={() => go(i)}
+                      aria-label={`Go to notice ${i + 1}`}
+                    />
+                  ))}
                 </div>
               </div>
-
-              {/* Only dots below, small space */}
-              {count > 1 && (
-                <div style={styles.dotsWrap}>
-                  <div style={styles.dots}>
-                    {notices.map((_, i) => (
-                      <div
-                        key={i}
-                        style={{ ...styles.dot, ...(i === index ? styles.dotActive : {}) }}
-                        onClick={() => go(i)}
-                        aria-label={`Go to notice ${i + 1}`}
-                      />
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
+            )}
           </div>
-        </Surface>
+        </div>
       </div>
     </SliderBoundary>
   )
