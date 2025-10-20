@@ -29,7 +29,7 @@ app.use('/*', async (c, next) => {
       if (!origin) return allowed[0] || '*'
       return allowed.includes(origin) ? origin : allowed[0] || '*'
     },
-    allowMethods: ['GET', 'POST', 'PATCH', 'OPTIONS'],
+    allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
     allowHeaders: ['Content-Type', 'Authorization'],
     maxAge: 86400,
   })(c, next)
@@ -73,6 +73,7 @@ async function ensureSchema(db: D1Database) {
       kind TEXT DEFAULT 'text',
       is_active INTEGER DEFAULT 1,
       priority INTEGER DEFAULT 0,
+      expires_at TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT
     )`,
@@ -96,8 +97,10 @@ async function ensureSchema(db: D1Database) {
   ]
   await db.batch(stmts.map((sql) => db.prepare(sql)))
 
+  // migrations
   try { await db.prepare(`ALTER TABLE users ADD COLUMN coin_balance INTEGER DEFAULT 0`).run() } catch {}
   try { await db.prepare(`ALTER TABLE notices ADD COLUMN kind TEXT DEFAULT 'text'`).run() } catch {}
+  try { await db.prepare(`ALTER TABLE notices ADD COLUMN expires_at TEXT`).run() } catch {}
 }
 app.use('*', async (c, next) => {
   await ensureSchema(c.env.DB)
@@ -187,6 +190,20 @@ function daysBetweenInclusive(startDate: string, endDate: string) {
 function nextUtcMidnightMs() {
   const now = new Date()
   return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0, 0)
+}
+function nowISO() {
+  return new Date().toISOString()
+}
+function parseExpiry(body: any): string | null {
+  if (typeof body?.expires_in_sec === 'number' && body.expires_in_sec > 0) {
+    return new Date(Date.now() + Math.floor(body.expires_in_sec) * 1000).toISOString()
+  }
+  const raw = (body?.expires_at || '').trim?.()
+  if (raw) {
+    const t = new Date(raw)
+    if (!isNaN(t.getTime())) return t.toISOString()
+  }
+  return null
 }
 
 // ---------- Chain profile helpers ----------
@@ -556,50 +573,54 @@ app.get('/api/stats/:address', async (c) => {
   }
 })
 
-// Notices: Public list
+// ---------- Notices: Public list (respects expiry) ----------
 app.get('/api/notices', async (c) => {
   try {
     const url = new URL(c.req.url)
     const limit = Math.min(Number(url.searchParams.get('limit') || '10'), 50)
     const onlyActive = url.searchParams.get('active') !== '0'
+    const now = nowISO()
 
-    const where = onlyActive ? 'WHERE is_active = 1' : ''
-    const stmt = `SELECT id, title, content_html, image_url, link_url, kind, priority, created_at
-                  FROM notices ${where} ORDER BY priority DESC, id DESC LIMIT ?`
-    const res = await c.env.DB.prepare(stmt).bind(limit).all()
-
-    return c.json({
-      notices: (res.results || []).map((n: any) => ({
-        id: n.id,
-        title: n.title,
-        content_html: n.content_html,
-        image_url: n.image_url,
-        link_url: n.link_url,
-        kind: n.kind || 'text',
-        priority: n.priority,
-        created_at: n.created_at,
-      })),
-    })
+    let stmt = ''
+    if (onlyActive) {
+      stmt = `SELECT id, title, content_html, image_url, link_url, kind, priority, created_at, expires_at
+              FROM notices
+              WHERE is_active = 1 AND (expires_at IS NULL OR expires_at > ?)
+              ORDER BY priority DESC, id DESC
+              LIMIT ?`
+      const res = await c.env.DB.prepare(stmt).bind(now, limit).all()
+      return c.json({ notices: (res.results || []) })
+    } else {
+      stmt = `SELECT id, title, content_html, image_url, link_url, kind, priority, created_at, expires_at, is_active
+              FROM notices
+              ORDER BY priority DESC, id DESC
+              LIMIT ?`
+      const res = await c.env.DB.prepare(stmt).bind(limit).all()
+      return c.json({ notices: (res.results || []) })
+    }
   } catch (e: any) {
     console.error('GET /api/notices error:', e.stack || e.message)
     return c.json({ error: 'Server error' }, 500)
   }
 })
 
-// Notices: create (owner only)
+// ---------- Notices: create (owner only) ----------
 app.post('/api/notices', async (c) => {
   try {
     const body = await c.req.json<{
       address: string
       timestamp: number
       signature: string
-      title?: string
-      content_html?: string
+      // minimal fields
       image_url?: string
       link_url?: string
+      content_html?: string
+      kind?: 'image' | 'script'
       is_active?: boolean
       priority?: number
-      kind?: 'image' | 'text' | 'script'
+      // expiry
+      expires_in_sec?: number
+      expires_at?: string
     }>()
     const { address, timestamp, signature } = body || ({} as any)
     if (!ethers.isAddress(address)) return c.json({ error: 'Invalid address' }, 400)
@@ -612,21 +633,29 @@ Timestamp: ${Number(timestamp)}`
     await verifySignedMessage(address, msg, signature)
     await requireOwner(c.env, address)
 
-    const title = (body.title || '').trim()
-    const kind = (body.kind || 'text') as 'image' | 'text' | 'script'
+    const kind = ((body.kind || 'image') as 'image' | 'script')
     const is_active = body.is_active === false ? 0 : 1
     const priority = Number.isFinite(body.priority) ? Number(body.priority) : 0
-    const image_url = kind === 'image' ? (body.image_url || '') : ''
-    const link_url = kind === 'image' ? (body.link_url || '') : ''
-    const content_html =
-      kind === 'text' ? (body.content_html || '') :
-      kind === 'script' ? (body.content_html || '') : ''
+    const expires_at = parseExpiry(body)
+
+    let image_url = ''
+    let link_url = ''
+    let content_html = ''
+
+    if (kind === 'image') {
+      image_url = (body.image_url || '').trim()
+      link_url = (body.link_url || '').trim()
+      if (!image_url) return c.json({ error: 'image_url required for image notice' }, 400)
+    } else if (kind === 'script') {
+      content_html = (body.content_html || '').trim()
+      if (!content_html) return c.json({ error: 'content_html required for script notice' }, 400)
+    }
 
     await c.env.DB.prepare(
-      `INSERT INTO notices (title, content_html, image_url, link_url, kind, is_active, priority, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO notices (title, content_html, image_url, link_url, kind, is_active, priority, expires_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
-      .bind(title, content_html, image_url, link_url, kind, is_active, priority, new Date().toISOString())
+      .bind('', content_html, image_url, link_url, kind, is_active, priority, expires_at, new Date().toISOString())
       .run()
 
     return c.json({ ok: true })
@@ -636,7 +665,7 @@ Timestamp: ${Number(timestamp)}`
   }
 })
 
-// Notices: update (owner only)
+// ---------- Notices: update (owner only) ----------
 app.patch('/api/notices/:id', async (c) => {
   try {
     const { id } = c.req.param()
@@ -644,13 +673,14 @@ app.patch('/api/notices/:id', async (c) => {
       address: string
       timestamp: number
       signature: string
-      title?: string
-      content_html?: string
       image_url?: string
       link_url?: string
+      content_html?: string
       is_active?: boolean
       priority?: number
-      kind?: 'image' | 'text' | 'script'
+      kind?: 'image' | 'script'
+      expires_in_sec?: number
+      expires_at?: string
     }>()
     const { address, timestamp, signature } = body || ({} as any)
     if (!ethers.isAddress(address)) return c.json({ error: 'Invalid address' }, 400)
@@ -665,15 +695,17 @@ Timestamp: ${Number(timestamp)}`
 
     const fields: string[] = []
     const values: any[] = []
-    if (typeof body.title === 'string') { fields.push('title = ?'); values.push(body.title.trim()) }
+
+    if (typeof body.image_url === 'string') { fields.push('image_url = ?'); values.push(body.image_url.trim()) }
+    if (typeof body.link_url === 'string') { fields.push('link_url = ?'); values.push(body.link_url.trim()) }
     if (typeof body.content_html === 'string') { fields.push('content_html = ?'); values.push(body.content_html) }
-    if (typeof body.image_url === 'string') { fields.push('image_url = ?'); values.push(body.image_url) }
-    if (typeof body.link_url === 'string') { fields.push('link_url = ?'); values.push(body.link_url) }
     if (typeof body.priority === 'number') { fields.push('priority = ?'); values.push(Number(body.priority)) }
     if (typeof body.is_active === 'boolean') { fields.push('is_active = ?'); values.push(body.is_active ? 1 : 0) }
-    if (typeof body.kind === 'string' && ['image', 'text', 'script'].includes(body.kind)) {
-      fields.push('kind = ?'); values.push(body.kind)
-    }
+    if (typeof body.kind === 'string' && ['image', 'script'].includes(body.kind)) { fields.push('kind = ?'); values.push(body.kind) }
+
+    const exp = parseExpiry(body)
+    if (exp !== null) { fields.push('expires_at = ?'); values.push(exp) }
+
     fields.push('updated_at = ?'); values.push(new Date().toISOString())
 
     if (fields.length === 0) return c.json({ error: 'No fields to update' }, 400)
@@ -688,99 +720,42 @@ Timestamp: ${Number(timestamp)}`
   }
 })
 
-// ---------- Admin stats ----------
-app.get('/api/admin/overview', async (c) => {
+// ---------- Notices: delete (owner only) ----------
+app.delete('/api/notices/:id', async (c) => {
   try {
-    const row = await c.env.DB.prepare('SELECT COUNT(*) AS cnt FROM users').bind().first<{ cnt: number }>()
-    const totalUsers = row?.cnt || 0
-    const sumRow = await c.env.DB.prepare('SELECT SUM(coin_balance) AS sumCoins FROM users').bind().first<{ sumCoins: number }>()
-    const totalCoins = Number(sumRow?.sumCoins || 0)
-    return c.json({ ok: true, total_users: totalUsers, total_coins: totalCoins })
+    const { id } = c.req.param()
+    const body = await c.req.json<{ address: string; timestamp: number; signature: string }>()
+    const { address, timestamp, signature } = body || ({} as any)
+    if (!ethers.isAddress(address)) return c.json({ error: 'Invalid address' }, 400)
+    if (!timestamp || !signature) return c.json({ error: 'Missing auth params' }, 400)
+
+    const msg = `Admin action authorization
+Purpose: delete_notice
+Address: ${ethers.getAddress(address)}
+Timestamp: ${Number(timestamp)}`
+    await verifySignedMessage(address, msg, signature)
+    await requireOwner(c.env, address)
+
+    await c.env.DB.prepare('DELETE FROM notices WHERE id = ?').bind(Number(id)).run()
+    return c.json({ ok: true })
   } catch (e: any) {
-    console.error('GET /api/admin/overview error:', e.stack || e.message)
+    console.error('DELETE /api/notices/:id error:', e.stack || e.message)
     return c.json({ error: 'Server error' }, 500)
   }
 })
 
-app.get('/api/admin/top-referrers', async (c) => {
+// ---------- Admin: list notices (manage UI) ----------
+app.get('/api/admin/notices', async (c) => {
   try {
     const url = new URL(c.req.url)
-    const limit = Math.min(Math.max(Number(url.searchParams.get('limit') || '10'), 1), 50)
+    const limit = Math.min(Number(url.searchParams.get('limit') || '100'), 200)
     const res = await c.env.DB.prepare(
-      `SELECT u.referrer_id AS user_id, u2.wallet_address AS address, COUNT(*) AS referrals
-       FROM users u
-       LEFT JOIN users u2 ON u2.user_id = u.referrer_id
-       WHERE u.referrer_id IS NOT NULL AND u.referrer_id <> ''
-       GROUP BY u.referrer_id
-       ORDER BY referrals DESC
-       LIMIT ?`
-    ).bind(limit).all<{ user_id: string; address: string | null; referrals: number }>()
-    const list = (res.results || []).map(r => ({
-      address: (r.address || '').toLowerCase(),
-      userId: (r.user_id || '').toUpperCase(),
-      count: Number(r.referrals || 0),
-    }))
-    return c.json({ ok: true, top: list })
+      `SELECT id, kind, is_active, priority, image_url, link_url, content_html, created_at, expires_at
+       FROM notices ORDER BY id DESC LIMIT ?`
+    ).bind(limit).all()
+    return c.json({ ok: true, notices: res.results || [] })
   } catch (e: any) {
-    console.error('GET /api/admin/top-referrers error:', e.stack || e.message)
-    return c.json({ error: 'Server error' }, 500)
-  }
-})
-
-/**
- * ---------- Notice Image Proxy ----------
- * GET /api/notice-img?src=<absolute http/https url>
- * - Bypasses mixed-content and hotlink restrictions
- * - Only serves image/* content-types
- */
-app.get('/api/notice-img', async (c) => {
-  try {
-    const urlObj = new URL(c.req.url)
-    const src = (urlObj.searchParams.get('src') || '').trim()
-    if (!src) return c.json({ error: 'Missing src' }, 400)
-
-    let target: URL
-    try {
-      target = new URL(src)
-    } catch {
-      return c.json({ error: 'Invalid url' }, 400)
-    }
-    if (target.protocol !== 'http:' && target.protocol !== 'https:') {
-      return c.json({ error: 'Unsupported protocol' }, 400)
-    }
-
-    const resp = await fetch(target.toString(), {
-      headers: {
-        // Some hosts require UA/Accept to allow image hotlink
-        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36',
-        'accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
-        'referer': '',
-      },
-      // @ts-ignore Cloudflare Workers hint
-      cf: { cacheTtl: 1800, cacheEverything: true },
-    } as RequestInit)
-
-    if (!resp.ok || !resp.body) {
-      return c.json({ error: `Upstream fetch failed (${resp.status})` }, 502)
-    }
-
-    const ct = resp.headers.get('content-type') || ''
-    if (!/^image\//i.test(ct)) {
-      return c.json({ error: 'Not an image' }, 415)
-    }
-
-    const headers = new Headers()
-    headers.set('content-type', ct)
-    headers.set('cache-control', 'public, max-age=1800, s-maxage=1800, immutable')
-    headers.set('x-proxy', 'notice-img')
-    headers.set('x-source', target.origin)
-    headers.set('x-content-type-options', 'nosniff')
-    headers.set('referrer-policy', 'no-referrer')
-    headers.set('cross-origin-resource-policy', 'cross-origin')
-
-    return new Response(resp.body, { headers, status: 200 })
-  } catch (e: any) {
-    console.error('GET /api/notice-img error:', e?.stack || e?.message || e)
+    console.error('GET /api/admin/notices error:', e.stack || e.message)
     return c.json({ error: 'Server error' }, 500)
   }
 })
