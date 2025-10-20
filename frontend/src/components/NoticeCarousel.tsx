@@ -14,36 +14,25 @@ type Notice = {
 
 const colors = {
   text: '#e8f9f1',
-  textMuted: 'rgba(232,249,241,0.75)',
-  line: 'rgba(255,255,255,0.12)',
-  accent: '#14b8a6',
+  dot: 'rgba(255,255,255,0.25)',
+  dotActive: '#14b8a6',
+  border: 'rgba(255,255,255,0.35)',
 }
 
 const styles: Record<string, React.CSSProperties> = {
   shell: { background: 'transparent', border: 'none', padding: 0 },
   wrap: { position: 'relative', overflow: 'hidden', borderRadius: 16 },
 
-  header: {
-    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-    padding: '10px 12px',
-    borderBottom: `1px solid ${colors.line}`, // চিকন দাগ
-    color: colors.text,
-  },
-  title: { fontWeight: 900, fontSize: 14 },
-  small: { fontSize: 12, color: colors.textMuted },
-
-  // Header-এর নিচের পুরো জায়গা নোটিশ দেখানোর জন্য
-  body: {
-    padding: 10,
-  },
+  // Header নেই, তাই শুধু কন্টেন্ট + ডটস
+  body: { padding: '6px 6px 0' }, // চারপাশে ন্যূনতম গ্যাপ
   viewport: {
     width: '100%',
-    height: 'clamp(220px, 52vw, 420px)', // মোবাইল-ডেস্কটপ রেসপনসিভ হাইট
+    height: 'clamp(240px, 54vw, 460px)', // মোবাইল থেকে ডেস্কটপ পর্যন্ত রেসপনসিভ
   },
   contentBox: {
     width: '100%',
     height: '100%',
-    border: '3px solid rgba(255,255,255,0.25)', // 3px বর্ডার
+    border: `3px solid ${colors.border}`, // 3px বর্ডার
     borderRadius: 12,
     overflow: 'hidden',
     background: 'rgba(0,0,0,0.35)',
@@ -53,7 +42,7 @@ const styles: Record<string, React.CSSProperties> = {
   img: {
     width: '100%',
     height: '100%',
-    objectFit: 'cover', // জোরে/ফুল এরিয়া ভরবে
+    objectFit: 'cover', // ফুল-এলাকা জুড়ে
     display: 'block',
   },
   iframe: {
@@ -63,18 +52,11 @@ const styles: Record<string, React.CSSProperties> = {
     background: 'transparent',
   },
 
-  dots: { display: 'flex', gap: 6, alignItems: 'center', justifyContent: 'center', padding: '8px 0' },
-  dot: { width: 8, height: 8, borderRadius: 8, background: 'rgba(255,255,255,0.25)', cursor: 'pointer' },
-  dotActive: { background: colors.accent, width: 18 },
-
-  arrow: {
-    position: 'absolute', top: '50%', transform: 'translateY(-50%)',
-    width: 34, height: 34, borderRadius: 8, display: 'grid', placeItems: 'center',
-    background: 'rgba(255,255,255,0.06)', color: colors.text, border: `1px solid ${colors.line}`,
-    cursor: 'pointer', userSelect: 'none' as const,
-  },
-  arrowLeft: { left: 8 },
-  arrowRight: { right: 8 },
+  // Dots: কেবল নিচে অল্প জায়গা
+  dotsWrap: { padding: '4px 0 8px', display: 'flex', justifyContent: 'center' },
+  dots: { display: 'flex', gap: 6, alignItems: 'center' },
+  dot: { width: 8, height: 8, borderRadius: 8, background: colors.dot, cursor: 'pointer' },
+  dotActive: { background: colors.dotActive, width: 18 },
 }
 
 const Surface: React.FC<{ children: React.ReactNode; style?: React.CSSProperties }> = ({ children, style }) => (
@@ -87,31 +69,20 @@ const Surface: React.FC<{ children: React.ReactNode; style?: React.CSSProperties
   </div>
 )
 
-const IconArrow: React.FC<{ dir: 'left' | 'right'; size?: number }> = ({ dir, size = 16 }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
-    {dir === 'left'
-      ? <path d="M15 19l-7-7 7-7" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-      : <path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>}
-  </svg>
-)
-
-// Local error boundary (যাতে স্লাইডার ভাঙলেও পেজ সাদা না হয়)
+// Error boundary যাতে স্লাইডার ফেইল করলেও পুরো পেজ ব্ল্যাঙ্ক না হয়
 class SliderBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean }> {
-  constructor(props: any) {
-    super(props)
-    this.state = { hasError: false }
-  }
+  constructor(props: any) { super(props); this.state = { hasError: false } }
   static getDerivedStateFromError() { return { hasError: true } }
   componentDidCatch(err: any) { console.error('NoticeCarousel error:', err) }
   render() {
     if (this.state.hasError) {
       return (
-        <div className="lxr-surface">
+        <div className="lxr-surface" style={{ padding: 10, borderRadius: 16 }}>
           <div className="lxr-surface-lines" />
           <div className="lxr-surface-mesh" />
           <div className="lxr-surface-circuit" />
           <div className="lxr-surface-holo" />
-          <div style={{ position: 'relative', zIndex: 2, padding: 10, color: colors.textMuted }}>
+          <div style={{ position: 'relative', zIndex: 2, color: 'rgba(232,249,241,0.75)', textAlign: 'center' }}>
             Announcements unavailable
           </div>
         </div>
@@ -123,21 +94,11 @@ class SliderBoundary extends React.Component<{ children: React.ReactNode }, { ha
 
 const BASE = (config.apiBaseUrl || '').replace(/\/+$/, '')
 
-function proxiedImg(src?: string) {
-  const url = (src || '').trim()
-  if (!url) return ''
-  // http/https হলে প্রোক্সির মাধ্যমে লোড হবে (mixed content/hotlink fix)
-  if (/^https?:\/\//i.test(url)) return `${BASE}/api/notice-img?src=${encodeURIComponent(url)}`
-  // data URL বা relative হলে 그대로
-  return url
-}
-
 const NoticeCarousel: React.FC<{ autoIntervalMs?: number; limit?: number }> = ({ autoIntervalMs = 5000, limit = 10 }) => {
   const [notices, setNotices] = useState<Notice[]>([])
   const [loading, setLoading] = useState(true)
   const [index, setIndex] = useState(0)
 
-  // Fetch notices
   useEffect(() => {
     let alive = true
     setLoading(true)
@@ -146,7 +107,6 @@ const NoticeCarousel: React.FC<{ autoIntervalMs?: number; limit?: number }> = ({
       .then((data) => {
         if (!alive) return
         const all: Notice[] = Array.isArray(data?.notices) ? data.notices : []
-        // শুধু image + script রাখতে বলা হয়েছে
         const filtered = all.filter((n) =>
           n && (n.kind === 'image' || n.kind === 'script') &&
           ((n.kind === 'image' && (n.image_url || '').trim()) || (n.kind === 'script' && (n.content_html || '').trim()))
@@ -154,10 +114,7 @@ const NoticeCarousel: React.FC<{ autoIntervalMs?: number; limit?: number }> = ({
         setNotices(filtered)
         setIndex(0)
       })
-      .catch((e) => {
-        console.error('Failed to load notices:', e)
-        setNotices([])
-      })
+      .catch((e) => { console.error('Failed to load notices:', e); setNotices([]) })
       .finally(() => alive && setLoading(false))
     return () => { alive = false }
   }, [limit])
@@ -167,12 +124,11 @@ const NoticeCarousel: React.FC<{ autoIntervalMs?: number; limit?: number }> = ({
 
   const go = (i: number) => setIndex((i + count) % count)
   const next = () => go(index + 1)
-  const prev = () => go(index - 1)
 
   // Hover pause
   const hoverRef = useRef(false)
-  const onMouseEnter = () => { hoverRef.current = true }
-  const onMouseLeave = () => { hoverRef.current = false }
+  const onEnter = () => { hoverRef.current = true }
+  const onLeave = () => { hoverRef.current = false }
 
   // Auto-slide
   useEffect(() => {
@@ -181,19 +137,31 @@ const NoticeCarousel: React.FC<{ autoIntervalMs?: number; limit?: number }> = ({
     return () => clearInterval(id)
   }, [count, index, autoIntervalMs])
 
-  // Touch swipe
+  // Touch swipe only (no arrows)
   const touchStartX = useRef<number | null>(null)
   const onTouchStart = (e: React.TouchEvent) => { touchStartX.current = e.touches[0].clientX }
   const onTouchEnd = (e: React.TouchEvent) => {
     if (touchStartX.current == null) return
     const dx = e.changedTouches[0].clientX - touchStartX.current
-    if (Math.abs(dx) > 40) { if (dx < 0) next(); else prev() }
+    if (Math.abs(dx) > 40) { if (dx < 0) next(); else go(index - 1) }
     touchStartX.current = null
   }
 
   const active = notices[index]
 
-  // Script iframe HTML
+  // image fallback: first try direct url; if fails, try proxy once
+  const [imgFailedOnce, setImgFailedOnce] = useState(false)
+  useEffect(() => { setImgFailedOnce(false) }, [index, count])
+
+  const buildImgSrc = (url?: string) => {
+    const u = (url || '').trim()
+    if (!u) return ''
+    if (!imgFailedOnce) return u // try direct first
+    // fallback to proxy (only if backend has it; onError আবার হলে কিছু করার নেই)
+    return `${BASE}/api/notice-img?src=${encodeURIComponent(u)}`
+  }
+
+  // Script iframe HTML (sandboxed)
   const scriptHtml = useMemo(() => {
     if (!active || active.kind !== 'script') return ''
     const content = String(active.content_html || '')
@@ -209,17 +177,13 @@ const NoticeCarousel: React.FC<{ autoIntervalMs?: number; limit?: number }> = ({
     <SliderBoundary>
       <div style={styles.shell}>
         <Surface>
-          <div style={styles.wrap}>
-            <div style={styles.header}>
-              <div style={styles.title}>Announcements</div>
-              {active?.created_at && <div style={styles.small}>{new Date(active.created_at).toLocaleString()}</div>}
-            </div>
-
-            {/* Header-এর নিচের পুরো অংশ */}
+          <div
+            style={styles.wrap}
+          >
             <div
               style={styles.body}
-              onMouseEnter={onMouseEnter}
-              onMouseLeave={onMouseLeave}
+              onMouseEnter={onEnter}
+              onMouseLeave={onLeave}
               onTouchStart={onTouchStart}
               onTouchEnd={onTouchEnd}
             >
@@ -230,20 +194,22 @@ const NoticeCarousel: React.FC<{ autoIntervalMs?: number; limit?: number }> = ({
                   ) : active ? (
                     active.kind === 'image' ? (
                       (() => {
-                        const src = proxiedImg(active.image_url)
-                        const imageEl = <img src={src} alt={active.title || 'notice'} style={styles.img} />
+                        const src = buildImgSrc(active.image_url)
+                        const img = (
+                          <img
+                            src={src}
+                            alt="notice"
+                            style={styles.img}
+                            onError={() => setImgFailedOnce(true)}
+                          />
+                        )
                         return active.link_url ? (
-                          <a
-                            href={active.link_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            style={{ display: 'contents' }}
-                          >
-                            {imageEl}
+                          <a href={active.link_url} target="_blank" rel="noopener noreferrer" style={{ display: 'contents' }}>
+                            {img}
                           </a>
-                        ) : imageEl
+                        ) : img
                       })()
-                    ) : active.kind === 'script' ? (
+                    ) : (
                       <iframe
                         title={`notice-script-${active.id}`}
                         sandbox="allow-scripts allow-popups"
@@ -251,20 +217,14 @@ const NoticeCarousel: React.FC<{ autoIntervalMs?: number; limit?: number }> = ({
                         style={styles.iframe}
                         referrerPolicy="no-referrer"
                       />
-                    ) : null
+                    )
                   ) : null}
                 </div>
               </div>
 
-              {/* Controls */}
+              {/* Only dots below, small space */}
               {count > 1 && (
-                <>
-                  <button type="button" aria-label="Previous" style={{ ...styles.arrow, ...styles.arrowLeft }} onClick={prev}>
-                    <IconArrow dir="left" />
-                  </button>
-                  <button type="button" aria-label="Next" style={{ ...styles.arrow, ...styles.arrowRight }} onClick={next}>
-                    <IconArrow dir="right" />
-                  </button>
+                <div style={styles.dotsWrap}>
                   <div style={styles.dots}>
                     {notices.map((_, i) => (
                       <div
@@ -275,7 +235,7 @@ const NoticeCarousel: React.FC<{ autoIntervalMs?: number; limit?: number }> = ({
                       />
                     ))}
                   </div>
-                </>
+                </div>
               )}
             </div>
           </div>
