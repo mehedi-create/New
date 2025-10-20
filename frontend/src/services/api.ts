@@ -10,7 +10,7 @@ export const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 })
 
-// Simple write-queue: all write (POST/PATCH) requests run sequentially
+// Simple write-queue: all write (POST/PATCH/DELETE) requests run sequentially
 let writeChain: Promise<void> = Promise.resolve()
 async function enqueueWrite<T>(fn: () => Promise<T>): Promise<T> {
   const p = writeChain.then(fn)
@@ -38,29 +38,55 @@ export type LoginResponse = {
   next_reset_utc_ms: number
 }
 
-export type NoticePayload = {
+// Public notices (for user dashboard)
+export type PublicNotice = {
+  id: number
+  kind: 'image' | 'script'
+  image_url?: string
+  link_url?: string
+  content_html?: string
+  priority?: number
+  created_at?: string
+  expires_at?: string | null
+}
+
+// Admin-side notice type
+export type AdminNotice = {
+  id: number
+  kind: 'image' | 'script'
+  is_active: 0 | 1
+  priority: number
+  image_url?: string
+  link_url?: string
+  content_html?: string
+  created_at?: string
+  expires_at?: string | null
+}
+
+// Admin: create/update payloads (no title; optional expiry)
+export type CreateNoticePayload = {
   address: string
   timestamp: number
   signature: string
-  title?: string
-  content_html?: string
+  kind: 'image' | 'script'
+  // image
   image_url?: string
   link_url?: string
+  // script
+  content_html?: string
+  // flags
   is_active?: boolean
   priority?: number
-  kind?: 'image' | 'text' | 'script'
+  // expiry (pick one or none)
+  expires_in_sec?: number
+  expires_at?: string
 }
 
-export type AdminOverviewResponse = {
-  ok: boolean
-  total_users: number
-  total_coins: number
-}
-
-export type AdminTopReferrer = {
+export type UpdateNoticePayload = Partial<Omit<CreateNoticePayload, 'kind'>> & {
   address: string
-  userId: string
-  count: number
+  timestamp: number
+  signature: string
+  kind?: 'image' | 'script'
 }
 
 // ---------------- Health ----------------
@@ -71,7 +97,6 @@ export const getStats = (address: string) =>
   api.get<StatsResponse>(`/api/stats/${address}`)
 
 // ---------------- User upsert (from chain) ----------------
-// Per-request longer timeout for serverless/cold-start
 export const upsertUserFromChain = (address: string, timestamp: number, signature: string) =>
   enqueueWrite(() =>
     api.post('/api/users/upsert-from-chain', { address, timestamp, signature }, { timeout: 45000 })
@@ -99,7 +124,6 @@ export const markLoginSmart = async (address: string) => {
       return { ok: true }
     }
     if (status === 409) {
-      // already counted / conflict → treat as success
       return { ok: true, already: true }
     }
     throw e
@@ -107,7 +131,6 @@ export const markLoginSmart = async (address: string) => {
 }
 
 // ---------------- Mining (off-chain record) ----------------
-// Verify tx on-chain then record purchase for daily coin credits
 export const recordMiningPurchase = async (address: string, txHash: string) => {
   const { signAuthMessage } = await import('../utils/contract')
   const { timestamp, signature } = await signAuthMessage(address)
@@ -120,17 +143,27 @@ export const recordMiningPurchase = async (address: string, txHash: string) => {
   )
 }
 
-// ---------------- Notices ----------------
+// ---------------- Public Notices ----------------
 export const getNotices = (params?: { limit?: number; active?: 0 | 1 }) =>
-  api.get('/api/notices', { params })
+  api.get<{ notices: PublicNotice[] }>('/api/notices', { params })
 
-export const createNotice = (payload: NoticePayload) =>
+// ---------------- Admin Notices (create/update/delete/list) ----------------
+export const createNotice = (payload: CreateNoticePayload) =>
   enqueueWrite(() => api.post('/api/notices', payload, { timeout: 45000 }))
 
-export const updateNotice = (id: number, payload: NoticePayload) =>
+export const updateNotice = (id: number, payload: UpdateNoticePayload) =>
   enqueueWrite(() => api.patch(`/api/notices/${id}`, payload, { timeout: 45000 }))
 
+export const deleteNotice = (id: number, payload: { address: string; timestamp: number; signature: string }) =>
+  enqueueWrite(() => api.delete(`/api/notices/${id}`, { data: payload, timeout: 45000 }))
+
+export const getAdminNotices = (limit = 100) =>
+  api.get<{ ok: boolean; notices: AdminNotice[] }>('/api/admin/notices', { params: { limit } })
+
 // ---------------- Admin (stats) ----------------
+export type AdminOverviewResponse = { ok: boolean; total_users: number; total_coins: number }
+export type AdminTopReferrer = { address: string; userId: string; count: number }
+
 export const getAdminOverview = () =>
   api.get<AdminOverviewResponse>('/api/admin/overview')
 
@@ -152,10 +185,9 @@ export const getUserBootstrap = async (address: string) => {
 }
 
 // ---------------- Ensure profile (optional helper) ----------------
-// Use this to silently create user off-chain if missing (e.g., after login/dashboard mount)
 export const ensureUserProfile = async (address: string) => {
   try {
-    await getStats(address) // exists → ok
+    await getStats(address)
     return { ensured: true, existed: true }
   } catch (e: any) {
     const status = e?.response?.status || e?.status
@@ -167,7 +199,6 @@ export const ensureUserProfile = async (address: string) => {
     await upsertUserFromChain(address, timestamp, signature)
     return { ensured: true, existed: false }
   } catch (e: any) {
-    // If backend returns 409/ok: true inflight/dedup, still consider ensured
     const status = e?.response?.status || e?.status
     if (status === 409) return { ensured: true, existed: false, conflict: true }
     throw e
