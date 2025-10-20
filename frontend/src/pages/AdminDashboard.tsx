@@ -18,6 +18,10 @@ import {
   deleteNotice,
   getAdminNotices,
   type AdminNotice,
+  getAdminOverview,
+  getAdminTopReferrers,
+  type AdminOverviewResponse,
+  type AdminTopReferrer,
 } from '../services/api'
 import { showSuccessToast, showErrorToast } from '../utils/notification'
 import { ethers, BrowserProvider } from 'ethers'
@@ -89,7 +93,6 @@ const styles: Record<string, React.CSSProperties> = {
   buttonDanger: {
     height: 44, borderRadius: 10, background: '#b91c1c', color: '#fff', border: 'none', fontSize: 14, fontWeight: 800, cursor: 'pointer', padding: '0 12px',
   },
-  row: { display: 'grid', gridTemplateColumns: '1fr', gap: 8, width: '100%' },
 
   // Bottom nav
   bottomNavWrap: { position: 'fixed', bottom: 12, left: '50%', transform: 'translateX(-50%)', width: '100%', maxWidth: 880, padding: '0 12px', zIndex: 200 },
@@ -98,7 +101,7 @@ const styles: Record<string, React.CSSProperties> = {
   navBtnActive: { background: `linear-gradient(45deg, ${colors.accent}, ${colors.accentSoft})`, color: '#0b1b3b', borderColor: colors.accent },
 }
 
-// Lexori surface
+// Surface wrapper
 const Surface: React.FC<{ children: React.ReactNode; style?: React.CSSProperties; title?: string; sub?: string }> = ({ children, style, title, sub }) => (
   <div className="lxr-surface" style={style}>
     <div className="lxr-surface-lines" />
@@ -122,13 +125,11 @@ const IconHome: React.FC<{ size?: number }> = ({ size = 20 }) => (
     <path d="M3 10.5L12 3l9 7.5v8.5a2 2 0 0 1-2 2h-5v-6H10v6H5a2 2 0 0 1-2-2v-8.5z" fill="currentColor"/>
   </svg>
 )
-
 const IconFinance: React.FC<{ size?: number }> = ({ size = 20 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" role="img" aria-hidden="true">
     <path d="M3 17h18v2H3v-2zm2-3h3v3H5v-3zm5-4h3v7h-3V10zm5-5h3v12h-3V5z" fill="currentColor"/>
   </svg>
 )
-
 const IconUser: React.FC<{ size?: number }> = ({ size = 18 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" role="img" aria-hidden="true">
     <path d="M12 12a5 5 0 1 0-5-5 5.006 5.006 0 0 0 5 5zm0 2c-5 0-9 2.5-9 5.5V22h18v-2.5C21 16.5 17 14 12 14z" fill="currentColor"/>
@@ -165,7 +166,7 @@ const AdminDashboard: React.FC = () => {
     refetchInterval: 30000,
   })
 
-  // Silent redirect if not admin/owner
+  // Redirect if not allowed
   useEffect(() => {
     if (!account) { navigate('/login', { replace: true }); return }
     if (role && !role.isAdmin && !role.isOwner) {
@@ -173,10 +174,9 @@ const AdminDashboard: React.FC = () => {
     }
   }, [account, role, navigate])
 
-  // Allow flag for queries
   const allow = !!account && !!role && (role.isAdmin || role.isOwner)
 
-  // Finance metrics (on-chain)
+  // Finance metrics
   const { data: finance } = useQuery({
     queryKey: ['adminFinance', account],
     enabled: allow,
@@ -191,7 +191,7 @@ const AdminDashboard: React.FC = () => {
     },
   })
 
-  // Admin notices list
+  // Notices list (admin manage)
   const { data: adminList = [], refetch: refetchAdminList, isFetching: isListFetching } = useQuery<AdminNotice[]>({
     queryKey: ['adminNotices'],
     enabled: allow,
@@ -199,6 +199,26 @@ const AdminDashboard: React.FC = () => {
     queryFn: async () => {
       const res = await getAdminNotices(150)
       return res.data.notices || []
+    },
+  })
+
+  // Analysis (restored)
+  const { data: overview } = useQuery<AdminOverviewResponse>({
+    queryKey: ['adminOverview'],
+    enabled: allow,
+    refetchInterval: 60000,
+    queryFn: async () => (await getAdminOverview()).data,
+  })
+  const totalUsers = overview?.total_users ?? 0
+  const totalCoins = overview?.total_coins ?? 0
+
+  const { data: topRef = [] } = useQuery<AdminTopReferrer[]>({
+    queryKey: ['adminTopReferrers'],
+    enabled: allow,
+    refetchInterval: 120000,
+    queryFn: async () => {
+      const res = await getAdminTopReferrers(10)
+      return res.data.top || []
     },
   })
 
@@ -234,7 +254,6 @@ Timestamp: ${ts}`
     try {
       setIsPosting(true)
       const { timestamp, signature } = await signAdminAction('create_notice', account)
-
       const expires_in_sec = minutesToSeconds(expireMinutes)
 
       if (postTab === 'image') {
@@ -343,7 +362,6 @@ Timestamp: ${ts}`
 
   // UI helpers
   const displayUserId = useMemo(() => (account || '').slice(0, 6).toUpperCase(), [account])
-  const isExpired = (n: AdminNotice) => !!n.expires_at && new Date(n.expires_at).getTime() <= Date.now()
 
   return (
     <div style={styles.page}>
@@ -376,7 +394,7 @@ Timestamp: ${ts}`
           </div>
         </div>
 
-        {/* Tabs content (no top nav tabs; only bottom nav) */}
+        {/* Tabs content (no top nav; only bottom nav) */}
         {activeTab === 'home' ? (
           <div style={styles.grid}>
             {/* Post Notice */}
@@ -440,6 +458,47 @@ Timestamp: ${ts}`
               )}
             </Surface>
 
+            {/* Analysis (restored) */}
+            <Surface title="Analysis" sub="Users • Total coins • Top referrers">
+              <div style={{ ...styles.small, marginBottom: 10 }}>
+                Total users: <strong style={{ color: colors.accent }}>{totalUsers}</strong>
+                {' '}• Total coins: <strong style={{ color: colors.accent }}>{Number(totalCoins || 0).toFixed(0)}</strong>
+              </div>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={styles.table}>
+                  <thead>
+                    <tr>
+                      <th style={styles.th}>#</th>
+                      <th style={styles.th}>User ID</th>
+                      <th style={styles.th}>Address</th>
+                      <th style={{ ...styles.th, textAlign: 'right' as const }}>Referrals</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(topRef || []).map((r, idx) => (
+                      <tr key={`${r.address || r.userId}-${idx}`}>
+                        <td style={styles.td}>{idx + 1}</td>
+                        <td style={styles.td}>{r.userId || '-'}</td>
+                        <td style={styles.td}>
+                          {r.address ? (
+                            <span title={r.address}>{r.address.slice(0, 6)}…{r.address.slice(-4)}</span>
+                          ) : (
+                            <span style={{ color: colors.textMuted }}>N/A</span>
+                          )}
+                        </td>
+                        <td style={{ ...styles.td, textAlign: 'right' }}>{r.count}</td>
+                      </tr>
+                    ))}
+                    {(!topRef || topRef.length === 0) && (
+                      <tr>
+                        <td colSpan={4} style={{ ...styles.td, color: colors.textMuted }}>No data</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </Surface>
+
             {/* Manage Notices */}
             <Surface title="Manage Notices" sub={isListFetching ? 'Refreshing…' : `Total: ${adminList.length}`}>
               <div style={{ overflowX: 'auto' }}>
@@ -456,21 +515,22 @@ Timestamp: ${ts}`
                   </thead>
                   <tbody>
                     {(adminList || []).map((n) => {
-                      const status = isExpired(n) ? 'Expired' : (n.is_active ? 'Active' : 'Inactive')
+                      const isExpired = !!n.expires_at && new Date(n.expires_at).getTime() <= Date.now()
+                      const statusText = isExpired ? 'Expired' : (n.is_active ? 'Active' : 'Inactive')
                       const expires = n.expires_at ? new Date(n.expires_at).toLocaleString() : '—'
                       const preview = n.kind === 'image' ? (n.image_url || '').slice(0, 32) : (n.content_html || '').slice(0, 32)
                       return (
                         <tr key={n.id}>
                           <td style={styles.td}>{n.id}</td>
                           <td style={styles.td}>{n.kind}</td>
-                          <td style={styles.td} title={status} >
-                            <span style={{ color: isExpired(n) ? colors.textMuted : colors.accent, fontWeight: 800 }}>{status}</span>
+                          <td style={styles.td}>
+                            <span style={{ color: isExpired ? colors.textMuted : colors.accent, fontWeight: 800 }}>{statusText}</span>
                           </td>
                           <td style={styles.td} title={n.kind === 'image' ? (n.image_url || '') : ''}>{preview || '—'}</td>
                           <td style={styles.td}>{expires}</td>
                           <td style={{ ...styles.td, textAlign: 'right' }}>
                             <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
-                              <QuickExpiry id={n.id} onSet={(mins) => setExpiryMinutes(n.id, mins)} />
+                              <QuickExpiry onSet={async (mins) => setExpiryMinutes(n.id, mins)} />
                               <button style={styles.buttonDanger} onClick={() => deleteOne(n.id)}>Delete</button>
                             </div>
                           </td>
@@ -555,9 +615,9 @@ Timestamp: ${ts}`
   )
 }
 
-const QuickExpiry: React.FC<{ id: number; onSet: (mins: number) => void }> = ({ id, onSet }) => {
+// Quick expiry setter
+const QuickExpiry: React.FC<{ onSet: (mins: number) => void }> = ({ onSet }) => {
   const [mins, setMins] = useState<string>('')
-
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
       <input
