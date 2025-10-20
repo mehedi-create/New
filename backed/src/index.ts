@@ -96,7 +96,6 @@ async function ensureSchema(db: D1Database) {
   ]
   await db.batch(stmts.map((sql) => db.prepare(sql)))
 
-  // columns that may not exist in older DBs
   try { await db.prepare(`ALTER TABLE users ADD COLUMN coin_balance INTEGER DEFAULT 0`).run() } catch {}
   try { await db.prepare(`ALTER TABLE notices ADD COLUMN kind TEXT DEFAULT 'text'`).run() } catch {}
 }
@@ -226,7 +225,6 @@ async function ensureUserInDb(env: Bindings, address: string) {
 
 // ---------- Mining helpers ----------
 function coinsFromAmountRaw(raw: bigint): number {
-  // Works for 6 or 18 decimals; take the larger integer
   const c18 = Number(raw / 10n ** 18n)
   const c6 = Number(raw / 10n ** 6n)
   return Math.max(c18, c6)
@@ -725,6 +723,64 @@ app.get('/api/admin/top-referrers', async (c) => {
     return c.json({ ok: true, top: list })
   } catch (e: any) {
     console.error('GET /api/admin/top-referrers error:', e.stack || e.message)
+    return c.json({ error: 'Server error' }, 500)
+  }
+})
+
+/**
+ * ---------- Notice Image Proxy ----------
+ * GET /api/notice-img?src=<absolute http/https url>
+ * - Bypasses mixed-content and hotlink restrictions
+ * - Only serves image/* content-types
+ */
+app.get('/api/notice-img', async (c) => {
+  try {
+    const urlObj = new URL(c.req.url)
+    const src = (urlObj.searchParams.get('src') || '').trim()
+    if (!src) return c.json({ error: 'Missing src' }, 400)
+
+    let target: URL
+    try {
+      target = new URL(src)
+    } catch {
+      return c.json({ error: 'Invalid url' }, 400)
+    }
+    if (target.protocol !== 'http:' && target.protocol !== 'https:') {
+      return c.json({ error: 'Unsupported protocol' }, 400)
+    }
+
+    const resp = await fetch(target.toString(), {
+      headers: {
+        // Some hosts require UA/Accept to allow image hotlink
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36',
+        'accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+        'referer': '',
+      },
+      // @ts-ignore Cloudflare Workers hint
+      cf: { cacheTtl: 1800, cacheEverything: true },
+    } as RequestInit)
+
+    if (!resp.ok || !resp.body) {
+      return c.json({ error: `Upstream fetch failed (${resp.status})` }, 502)
+    }
+
+    const ct = resp.headers.get('content-type') || ''
+    if (!/^image\//i.test(ct)) {
+      return c.json({ error: 'Not an image' }, 415)
+    }
+
+    const headers = new Headers()
+    headers.set('content-type', ct)
+    headers.set('cache-control', 'public, max-age=1800, s-maxage=1800, immutable')
+    headers.set('x-proxy', 'notice-img')
+    headers.set('x-source', target.origin)
+    headers.set('x-content-type-options', 'nosniff')
+    headers.set('referrer-policy', 'no-referrer')
+    headers.set('cross-origin-resource-policy', 'cross-origin')
+
+    return new Response(resp.body, { headers, status: 200 })
+  } catch (e: any) {
+    console.error('GET /api/notice-img error:', e?.stack || e?.message || e)
     return c.json({ error: 'Server error' }, 500)
   }
 })
