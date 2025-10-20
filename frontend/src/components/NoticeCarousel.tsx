@@ -1,14 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { config } from '../config'
 
-// Types
 type Notice = {
   id: number
   title?: string
   content_html?: string
   image_url?: string
   link_url?: string
-  kind?: 'image' | 'text' | 'script'
+  kind?: 'image' | 'script'
   priority?: number
   created_at?: string
 }
@@ -16,25 +15,53 @@ type Notice = {
 const colors = {
   text: '#e8f9f1',
   textMuted: 'rgba(232,249,241,0.75)',
-  grayLine: 'rgba(255,255,255,0.12)',
+  line: 'rgba(255,255,255,0.12)',
   accent: '#14b8a6',
 }
 
 const styles: Record<string, React.CSSProperties> = {
   shell: { background: 'transparent', border: 'none', padding: 0 },
-  wrap: { position: 'relative', overflow: 'hidden', borderRadius: 12 },
+  wrap: { position: 'relative', overflow: 'hidden', borderRadius: 16 },
+
   header: {
     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-    padding: '8px 10px', borderBottom: `1px solid ${colors.grayLine}`, color: colors.text,
+    padding: '10px 12px',
+    borderBottom: `1px solid ${colors.line}`, // চিকন দাগ
+    color: colors.text,
   },
   title: { fontWeight: 900, fontSize: 14 },
   small: { fontSize: 12, color: colors.textMuted },
 
-  body: { minHeight: 160, display: 'grid', placeItems: 'center', padding: 10 },
-  img: { maxWidth: '100%', maxHeight: 200, display: 'block', borderRadius: 10, border: `1px solid ${colors.grayLine}` },
-  placeholder: { width: '100%', height: 160, borderRadius: 10, background: 'rgba(255,255,255,0.06)', border: `1px solid ${colors.grayLine}` },
-
-  iframeBox: { width: '100%', height: 200, border: 'none' },
+  // Header-এর নিচের পুরো জায়গা নোটিশ দেখানোর জন্য
+  body: {
+    padding: 10,
+  },
+  viewport: {
+    width: '100%',
+    height: 'clamp(220px, 52vw, 420px)', // মোবাইল-ডেস্কটপ রেসপনসিভ হাইট
+  },
+  contentBox: {
+    width: '100%',
+    height: '100%',
+    border: '3px solid rgba(255,255,255,0.25)', // 3px বর্ডার
+    borderRadius: 12,
+    overflow: 'hidden',
+    background: 'rgba(0,0,0,0.35)',
+    display: 'grid',
+    placeItems: 'center',
+  },
+  img: {
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover', // জোরে/ফুল এরিয়া ভরবে
+    display: 'block',
+  },
+  iframe: {
+    width: '100%',
+    height: '100%',
+    border: 'none',
+    background: 'transparent',
+  },
 
   dots: { display: 'flex', gap: 6, alignItems: 'center', justifyContent: 'center', padding: '8px 0' },
   dot: { width: 8, height: 8, borderRadius: 8, background: 'rgba(255,255,255,0.25)', cursor: 'pointer' },
@@ -42,15 +69,33 @@ const styles: Record<string, React.CSSProperties> = {
 
   arrow: {
     position: 'absolute', top: '50%', transform: 'translateY(-50%)',
-    width: 32, height: 32, borderRadius: 8, display: 'grid', placeItems: 'center',
-    background: 'rgba(255,255,255,0.06)', color: colors.text, border: `1px solid ${colors.grayLine}`,
+    width: 34, height: 34, borderRadius: 8, display: 'grid', placeItems: 'center',
+    background: 'rgba(255,255,255,0.06)', color: colors.text, border: `1px solid ${colors.line}`,
     cursor: 'pointer', userSelect: 'none' as const,
   },
   arrowLeft: { left: 8 },
   arrowRight: { right: 8 },
 }
 
-// Local error boundary to ensure slider never breaks the page
+const Surface: React.FC<{ children: React.ReactNode; style?: React.CSSProperties }> = ({ children, style }) => (
+  <div className="lxr-surface" style={style}>
+    <div className="lxr-surface-lines" />
+    <div className="lxr-surface-mesh" />
+    <div className="lxr-surface-circuit" />
+    <div className="lxr-surface-holo" />
+    <div style={{ position: 'relative', zIndex: 2 }}>{children}</div>
+  </div>
+)
+
+const IconArrow: React.FC<{ dir: 'left' | 'right'; size?: number }> = ({ dir, size = 16 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+    {dir === 'left'
+      ? <path d="M15 19l-7-7 7-7" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+      : <path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>}
+  </svg>
+)
+
+// Local error boundary (যাতে স্লাইডার ভাঙলেও পেজ সাদা না হয়)
 class SliderBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean }> {
   constructor(props: any) {
     super(props)
@@ -76,45 +121,35 @@ class SliderBoundary extends React.Component<{ children: React.ReactNode }, { ha
   }
 }
 
-const Surface: React.FC<{ children: React.ReactNode; style?: React.CSSProperties }> = ({ children, style }) => (
-  <div className="lxr-surface" style={style}>
-    <div className="lxr-surface-lines" />
-    <div className="lxr-surface-mesh" />
-    <div className="lxr-surface-circuit" />
-    <div className="lxr-surface-holo" />
-    <div style={{ position: 'relative', zIndex: 2 }}>{children}</div>
-  </div>
-)
+const BASE = (config.apiBaseUrl || '').replace(/\/+$/, '')
 
-const IconArrow: React.FC<{ dir: 'left' | 'right'; size?: number }> = ({ dir, size = 16 }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
-    {dir === 'left'
-      ? <path d="M15 19l-7-7 7-7" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-      : <path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>}
-  </svg>
-)
+function proxiedImg(src?: string) {
+  const url = (src || '').trim()
+  if (!url) return ''
+  // http/https হলে প্রোক্সির মাধ্যমে লোড হবে (mixed content/hotlink fix)
+  if (/^https?:\/\//i.test(url)) return `${BASE}/api/notice-img?src=${encodeURIComponent(url)}`
+  // data URL বা relative হলে 그대로
+  return url
+}
 
-type Props = { autoIntervalMs?: number; limit?: number }
-
-const NoticeCarousel: React.FC<Props> = ({ autoIntervalMs = 5000, limit = 10 }) => {
+const NoticeCarousel: React.FC<{ autoIntervalMs?: number; limit?: number }> = ({ autoIntervalMs = 5000, limit = 10 }) => {
   const [notices, setNotices] = useState<Notice[]>([])
   const [loading, setLoading] = useState(true)
   const [index, setIndex] = useState(0)
 
-  const base = (config.apiBaseUrl || '').replace(/\/+$/, '')
-
-  // Fetch notices (no React Query; simple fetch)
+  // Fetch notices
   useEffect(() => {
     let alive = true
     setLoading(true)
-    fetch(`${base}/api/notices?active=1&limit=${Math.min(Math.max(limit || 10, 1), 50)}`)
+    fetch(`${BASE}/api/notices?active=1&limit=${Math.min(Math.max(limit || 10, 1), 50)}`)
       .then((r) => r.json())
       .then((data) => {
         if (!alive) return
         const all: Notice[] = Array.isArray(data?.notices) ? data.notices : []
-        // Only image and script kinds are allowed (as requested)
+        // শুধু image + script রাখতে বলা হয়েছে
         const filtered = all.filter((n) =>
-          n && (n.kind === 'image' || n.kind === 'script') && ((n.kind === 'image' && (n.image_url || '').trim()) || n.kind === 'script')
+          n && (n.kind === 'image' || n.kind === 'script') &&
+          ((n.kind === 'image' && (n.image_url || '').trim()) || (n.kind === 'script' && (n.content_html || '').trim()))
         )
         setNotices(filtered)
         setIndex(0)
@@ -125,7 +160,7 @@ const NoticeCarousel: React.FC<Props> = ({ autoIntervalMs = 5000, limit = 10 }) 
       })
       .finally(() => alive && setLoading(false))
     return () => { alive = false }
-  }, [base, limit])
+  }, [limit])
 
   const count = notices.length
   useEffect(() => { if (index >= count && count > 0) setIndex(0) }, [count, index])
@@ -134,7 +169,7 @@ const NoticeCarousel: React.FC<Props> = ({ autoIntervalMs = 5000, limit = 10 }) 
   const next = () => go(index + 1)
   const prev = () => go(index - 1)
 
-  // Pause on hover
+  // Hover pause
   const hoverRef = useRef(false)
   const onMouseEnter = () => { hoverRef.current = true }
   const onMouseLeave = () => { hoverRef.current = false }
@@ -158,7 +193,7 @@ const NoticeCarousel: React.FC<Props> = ({ autoIntervalMs = 5000, limit = 10 }) 
 
   const active = notices[index]
 
-  // Prepare iframe HTML for scripts (sandboxed)
+  // Script iframe HTML
   const scriptHtml = useMemo(() => {
     if (!active || active.kind !== 'script') return ''
     const content = String(active.content_html || '')
@@ -168,73 +203,81 @@ const NoticeCarousel: React.FC<Props> = ({ autoIntervalMs = 5000, limit = 10 }) 
 </head><body>${content}</body></html>`
   }, [active])
 
-  // no notices → hide block
   if (!loading && count === 0) return null
 
   return (
     <SliderBoundary>
       <div style={styles.shell}>
         <Surface>
-          <div
-            style={styles.wrap}
-            onMouseEnter={onMouseEnter}
-            onMouseLeave={onMouseLeave}
-            onTouchStart={onTouchStart}
-            onTouchEnd={onTouchEnd}
-          >
+          <div style={styles.wrap}>
             <div style={styles.header}>
               <div style={styles.title}>Announcements</div>
               {active?.created_at && <div style={styles.small}>{new Date(active.created_at).toLocaleString()}</div>}
             </div>
 
-            <div style={styles.body}>
-              {loading ? (
-                <div style={styles.placeholder} />
-              ) : active ? (
-                active.kind === 'image' ? (
-                  active.image_url ? (
-                    <a
-                      href={active.link_url || '#'}
-                      target={active.link_url ? '_blank' : undefined}
-                      rel={active.link_url ? 'noopener noreferrer' : undefined}
-                      style={{ display: 'inline-block' }}
-                    >
-                      <img src={active.image_url} alt={active.title || 'notice'} style={styles.img} />
-                    </a>
-                  ) : (
-                    <div style={{ color: colors.textMuted }}>Invalid image notice</div>
-                  )
-                ) : active.kind === 'script' ? (
-                  <iframe
-                    title={`notice-script-${active.id}`}
-                    sandbox="allow-scripts allow-popups"
-                    srcDoc={scriptHtml}
-                    style={styles.iframeBox}
-                  />
-                ) : null
-              ) : null}
-            </div>
-
-            {count > 1 && (
-              <>
-                <button type="button" aria-label="Previous" style={{ ...styles.arrow, ...styles.arrowLeft }} onClick={prev}>
-                  <IconArrow dir="left" />
-                </button>
-                <button type="button" aria-label="Next" style={{ ...styles.arrow, ...styles.arrowRight }} onClick={next}>
-                  <IconArrow dir="right" />
-                </button>
-                <div style={styles.dots}>
-                  {notices.map((_, i) => (
-                    <div
-                      key={i}
-                      style={{ ...styles.dot, ...(i === index ? styles.dotActive : {}) }}
-                      onClick={() => go(i)}
-                      aria-label={`Go to notice ${i + 1}`}
-                    />
-                  ))}
+            {/* Header-এর নিচের পুরো অংশ */}
+            <div
+              style={styles.body}
+              onMouseEnter={onMouseEnter}
+              onMouseLeave={onMouseLeave}
+              onTouchStart={onTouchStart}
+              onTouchEnd={onTouchEnd}
+            >
+              <div style={styles.viewport}>
+                <div style={styles.contentBox}>
+                  {loading ? (
+                    <div style={{ width: '100%', height: '100%', background: 'rgba(255,255,255,0.06)' }} />
+                  ) : active ? (
+                    active.kind === 'image' ? (
+                      (() => {
+                        const src = proxiedImg(active.image_url)
+                        const imageEl = <img src={src} alt={active.title || 'notice'} style={styles.img} />
+                        return active.link_url ? (
+                          <a
+                            href={active.link_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{ display: 'contents' }}
+                          >
+                            {imageEl}
+                          </a>
+                        ) : imageEl
+                      })()
+                    ) : active.kind === 'script' ? (
+                      <iframe
+                        title={`notice-script-${active.id}`}
+                        sandbox="allow-scripts allow-popups"
+                        srcDoc={scriptHtml}
+                        style={styles.iframe}
+                        referrerPolicy="no-referrer"
+                      />
+                    ) : null
+                  ) : null}
                 </div>
-              </>
-            )}
+              </div>
+
+              {/* Controls */}
+              {count > 1 && (
+                <>
+                  <button type="button" aria-label="Previous" style={{ ...styles.arrow, ...styles.arrowLeft }} onClick={prev}>
+                    <IconArrow dir="left" />
+                  </button>
+                  <button type="button" aria-label="Next" style={{ ...styles.arrow, ...styles.arrowRight }} onClick={next}>
+                    <IconArrow dir="right" />
+                  </button>
+                  <div style={styles.dots}>
+                    {notices.map((_, i) => (
+                      <div
+                        key={i}
+                        style={{ ...styles.dot, ...(i === index ? styles.dotActive : {}) }}
+                        onClick={() => go(i)}
+                        aria-label={`Go to notice ${i + 1}`}
+                      />
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </Surface>
       </div>
