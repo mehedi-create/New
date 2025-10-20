@@ -1,9 +1,10 @@
-import React, { useEffect } from 'react'
+import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { WalletProvider } from './context/WalletContext'
 import AppRouter from './Router'
 
+// React Query client
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: { retry: 1, refetchOnWindowFocus: false, staleTime: 20_000, gcTime: 5 * 60_000 },
@@ -11,6 +12,7 @@ const queryClient = new QueryClient({
   },
 })
 
+// Cookie helpers
 function setCookie(name: string, value: string, days = 365) {
   const maxAge = days * 24 * 60 * 60
   const secure = window.location.protocol === 'https:' ? '; Secure' : ''
@@ -23,6 +25,7 @@ function getCookie(name: string): string | null {
   return null
 }
 
+// Global theme CSS (unchanged)
 const THEME_CSS = `
 :root{
   --deep:#0b1b3b; --soft:#163057; --accent:#14b8a6; --accentSoft:#e0f5ed;
@@ -77,14 +80,8 @@ html, body { min-height: 100%; height: auto; margin: 0; background-color: var(--
   linear-gradient(90deg, transparent 40%, rgba(22,48,87,0.3) 41%, rgba(22,48,87,0.3) 42%, transparent 43%);
   background-size: 120px 120px, 100px 100px, 80px 80px;
 }
-.lxr-surface-circuit{
-  opacity:.2; background-image: linear-gradient(90deg, rgba(20,184,166,0.1) 1px, transparent 1px), linear-gradient(rgba(20,184,166,0.1) 1px, transparent 1px);
-  background-size: 20px 20px;
-}
-.lxr-surface-holo{
-  position:absolute; top:0; left:0; height:4px; width:100%;
-  background: linear-gradient(90deg, transparent 0%, rgba(20,184,166,0.35) 25%, rgba(232,249,241,0.35) 50%, rgba(224,245,237,0.35) 75%, transparent 100%);
-}
+.lxr-surface-circuit{ opacity:.2; background-image: linear-gradient(90deg, rgba(20,184,166,0.1) 1px, transparent 1px), linear-gradient(rgba(20,184,166,0.1) 1px, transparent 1px); background-size: 20px 20px; }
+.lxr-surface-holo{ position:absolute; top:0; left:0; height:4px; width:100%; background: linear-gradient(90deg, transparent 0%, rgba(20,184,166,0.35) 25%, rgba(232,249,241,0.35) 50%, rgba(224,245,237,0.35) 75%, transparent 100%); }
 
 /* Mining card */
 .lxr-mining-card{
@@ -126,7 +123,7 @@ html, body { min-height: 100%; height: auto; margin: 0; background-color: var(--
 `
 
 function GlobalLexoriTheme() {
-  useEffect(() => {
+  React.useEffect(() => {
     const theme = getCookie('theme') || 'lexori'
     document.documentElement.classList.add(`theme-${theme}`)
     if (!getCookie('theme')) setCookie('theme', theme, 365)
@@ -134,13 +131,119 @@ function GlobalLexoriTheme() {
   return <style dangerouslySetInnerHTML={{ __html: THEME_CSS }} />
 }
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
+// Global Error Boundary (prevents white screen)
+class AppErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean; message: string }
+> {
+  constructor(props: any) {
+    super(props)
+    this.state = { hasError: false, message: '' }
+  }
+  static getDerivedStateFromError(error: any) {
+    const msg = (error && (error.message || String(error))) || 'Unknown runtime error'
+    return { hasError: true, message: msg }
+  }
+  componentDidCatch(error: any, info: any) {
+    console.error('AppErrorBoundary caught:', error, info)
+  }
+  reload = () => window.location.reload()
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div
+          style={{
+            minHeight: '100vh',
+            background: 'linear-gradient(135deg, #0b1b3b, #163057)',
+            color: '#e8f9f1',
+            display: 'grid',
+            placeItems: 'center',
+            padding: 16,
+          }}
+        >
+          <div
+            style={{
+              width: '100%',
+              maxWidth: 720,
+              borderRadius: 14,
+              border: '1px solid rgba(255,255,255,0.12)',
+              padding: 16,
+              background: 'rgba(11,27,59,0.35)',
+              backdropFilter: 'blur(6px)',
+            }}
+          >
+            <div style={{ fontSize: 18, fontWeight: 900, marginBottom: 8 }}>
+              Something went wrong
+            </div>
+            <div style={{ fontSize: 13, whiteSpace: 'pre-wrap', wordBreak: 'break-word', opacity: 0.9 }}>
+              {this.state.message}
+            </div>
+            <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button
+                onClick={this.reload}
+                style={{
+                  height: 40,
+                  borderRadius: 10,
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: '0 14px',
+                  fontWeight: 800,
+                  background: 'linear-gradient(45deg, #14b8a6, #e0f5ed)',
+                  color: '#0b1b3b',
+                }}
+              >
+                Reload
+              </button>
+              <a
+                href="https://reactjs.org/docs/error-decoder.html?invariant=300"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  height: 40,
+                  borderRadius: 10,
+                  padding: '10px 14px',
+                  fontWeight: 800,
+                  border: '1px solid rgba(255,255,255,0.2)',
+                  color: '#e8f9f1',
+                  textDecoration: 'none',
+                }}
+              >
+                React error #300 help
+              </a>
+            </div>
+          </div>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
+
+// Global listeners to log issues
+if (typeof window !== 'undefined') {
+  window.addEventListener('error', (e) => {
+    console.error('Global window error:', e?.error || e?.message || e)
+  })
+  window.addEventListener('unhandledrejection', (e) => {
+    console.error('Global unhandledrejection:', e?.reason || e)
+  })
+}
+
+const rootEl = document.getElementById('root')
+if (!rootEl) {
+  throw new Error('Root container not found. Ensure <div id="root"></div> exists in index.html')
+}
+
+ReactDOM.createRoot(rootEl).render(
+  // StrictMode রাখলে ডেভেলপমেন্টে কিছু কম্পোনেন্ট দুইবার মাউন্ট হতে পারে; সমস্যা হলে সাময়িকভাবে সরিয়ে দেখুন।
   <React.StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <WalletProvider>
-        <GlobalLexoriTheme />
-        <AppRouter />
-      </WalletProvider>
-    </QueryClientProvider>
+    <AppErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <WalletProvider>
+          <GlobalLexoriTheme />
+          <AppRouter />
+        </WalletProvider>
+      </QueryClientProvider>
+    </AppErrorBoundary>
   </React.StrictMode>
 )
