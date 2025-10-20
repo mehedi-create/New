@@ -16,7 +16,7 @@ import {
 import { showSuccessToast, showErrorToast } from '../utils/notification'
 import { markLogin, getStats, type StatsResponse, upsertUserFromChain } from '../services/api'
 import { isValidAddress } from '../utils/wallet'
-import NoticeCarousel from '../components/NoticeCarousel' // NEW
+import NoticeCarousel from '../components/NoticeCarousel'
 
 type OnChainData = {
   userBalance: string
@@ -208,7 +208,7 @@ const Dashboard: React.FC = () => {
     },
   })
 
-  // ---------- Auto-sync off-chain profile ----------
+  // ---------- Auto-sync: on-chain registered but off-chain missing → silent upsert ----------
   const ensureRef = useRef<{ inFlight: boolean; last: number }>({ inFlight: false, last: 0 })
   useEffect(() => {
     if (!isValidAddress(account)) return
@@ -225,7 +225,7 @@ const Dashboard: React.FC = () => {
           exists = !!res?.data?.userId
         } catch (e: any) {
           const status = e?.response?.status || e?.status
-          if (status !== 404) return
+          if (status !== 404) return // অন্য এরর হলে সাইলেন্ট
         }
         if (!exists) {
           const { timestamp, signature } = await signAuthMessage(account!)
@@ -287,11 +287,13 @@ const Dashboard: React.FC = () => {
     setIsProcessing(true)
     try {
       const { timestamp, signature } = await signAuthMessage(account!)
+      // First try markLogin
       try {
         await markLogin(account!, timestamp, signature)
       } catch (err: any) {
         const status = err?.response?.status || err?.status
         if (status === 404) {
+          // upsert silently then retry
           await upsertUserFromChain(account!, timestamp, signature)
           await markLogin(account!, timestamp, signature)
         } else {
