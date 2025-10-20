@@ -11,11 +11,9 @@ import {
   emergencyWithdrawAll,
   withdrawLiquidity,
   getTotalCollected,
-  getTotalUsersFromChain,
-  getTopReferrersFromChain,
 } from '../utils/contract'
 import { showSuccessToast, showErrorToast } from '../utils/notification'
-import { createNotice } from '../services/api'
+import { createNotice, getAdminOverview, getAdminTopReferrers, type AdminOverviewResponse, type AdminTopReferrer } from '../services/api'
 import { ethers, BrowserProvider } from 'ethers'
 
 // Icons (SVG)
@@ -148,7 +146,7 @@ const AdminDashboard: React.FC = () => {
     return () => { document.removeEventListener('mousedown', onDocClick); document.removeEventListener('keydown', onKey) }
   }, [])
 
-  // Role check hook (unchanged order; effect will redirect silently)
+  // Role check (on-chain)
   const { data: role } = useQuery<{ isAdmin: boolean; isOwner: boolean }>({
     queryKey: ['adminRole', account],
     enabled: !!account,
@@ -161,7 +159,7 @@ const AdminDashboard: React.FC = () => {
     refetchInterval: 30000,
   })
 
-  // Silent redirect if not admin/owner (no UI flash)
+  // Silent redirect if not admin/owner
   useEffect(() => {
     if (!account) { navigate('/login', { replace: true }); return }
     if (role && !role.isAdmin && !role.isOwner) {
@@ -172,7 +170,7 @@ const AdminDashboard: React.FC = () => {
   // Allow flag for queries
   const allow = !!account && !!role && (role.isAdmin || role.isOwner)
 
-  // Finance metrics
+  // Finance metrics (on-chain)
   const { data: finance } = useQuery({
     queryKey: ['adminFinance', account],
     enabled: allow,
@@ -187,19 +185,27 @@ const AdminDashboard: React.FC = () => {
     },
   })
 
-  // Analytics
-  const { data: totalUsers = 0 } = useQuery<number>({
-    queryKey: ['totalUsers'],
+  // Analytics (off-chain backend)
+  const { data: overview } = useQuery<AdminOverviewResponse>({
+    queryKey: ['adminOverview'],
     enabled: allow,
     refetchInterval: 60000,
-    queryFn: () => getTotalUsersFromChain(),
+    queryFn: async () => {
+      const res = await getAdminOverview()
+      return res.data
+    },
   })
+  const totalUsers = overview?.total_users ?? 0
+  const totalCoins = overview?.total_coins ?? 0
 
   const { data: topRef = [] } = useQuery<RefTop[]>({
     queryKey: ['topReferrers'],
     enabled: allow,
     refetchInterval: 120000,
-    queryFn: () => getTopReferrersFromChain(10),
+    queryFn: async () => {
+      const res = await getAdminTopReferrers(10)
+      return res.data.top || []
+    },
   })
 
   // Notice posting
@@ -448,6 +454,9 @@ Timestamp: ${ts}`
               <div style={{ fontWeight: 900, marginBottom: 6 }}>Analysis</div>
               <div style={{ marginBottom: 10, ...styles.small }}>
                 Total users: <strong style={{ color: colors.accent }}>{totalUsers}</strong>
+                {typeof totalCoins === 'number' ? (
+                  <> • Total coins: <strong style={{ color: colors.accent }}>{Number(totalCoins).toFixed(0)}</strong></>
+                ) : null}
               </div>
 
               <div style={{ overflowX: 'auto' }}>
@@ -462,11 +471,15 @@ Timestamp: ${ts}`
                   </thead>
                   <tbody>
                     {(topRef || []).map((r, idx) => (
-                      <tr key={r.address}>
+                      <tr key={`${r.address || r.userId}-${idx}`}>
                         <td style={styles.td}>{idx + 1}</td>
                         <td style={styles.td}>{r.userId || '-'}</td>
                         <td style={styles.td}>
-                          <span title={r.address}>{r.address.slice(0, 6)}…{r.address.slice(-4)}</span>
+                          {r.address ? (
+                            <span title={r.address}>{r.address.slice(0, 6)}…{r.address.slice(-4)}</span>
+                          ) : (
+                            <span style={{ color: colors.textMuted }}>N/A</span>
+                          )}
                         </td>
                         <td style={{ ...styles.td, textAlign: 'right' }}>{r.count}</td>
                       </tr>
