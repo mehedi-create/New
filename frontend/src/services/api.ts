@@ -22,7 +22,20 @@ async function enqueueWrite<T>(fn: () => Promise<T>): Promise<T> {
 export type StatsResponse = {
   userId: string
   coin_balance: number
-  logins: { total_login_days: number }
+  logins: {
+    total_login_days: number
+    today_claimed: boolean
+    today_date: string
+    next_reset_utc_ms: number
+  }
+}
+
+export type LoginResponse = {
+  ok: boolean
+  total_login_days: number
+  mining_credited: number
+  today_claimed: boolean
+  next_reset_utc_ms: number
 }
 
 export type NoticePayload = {
@@ -67,7 +80,7 @@ export const upsertUserFromChain = (address: string, timestamp: number, signatur
 // ---------------- Daily login (signed) ----------------
 export const markLogin = (address: string, timestamp: number, signature: string) =>
   enqueueWrite(() =>
-    api.post(`/api/users/${address}/login`, { timestamp, signature }, { timeout: 45000 })
+    api.post<LoginResponse>(`/api/users/${address}/login`, { timestamp, signature }, { timeout: 45000 })
   )
 
 // Smart helper (optional): ensure + login in one go
