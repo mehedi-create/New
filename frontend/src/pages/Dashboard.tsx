@@ -127,7 +127,6 @@ const styles: Record<string, React.CSSProperties> = {
     padding: 12,
   },
 
-  // History modal table
   table: { width: '100%', borderCollapse: 'collapse' as const, color: colors.text },
   th: { textAlign: 'left' as const, padding: '8px 10px', borderBottom: `1px solid ${colors.grayLine}`, fontWeight: 900, fontSize: 13 },
   td: { padding: '8px 10px', borderBottom: `1px solid ${colors.grayLine}`, fontSize: 13 },
@@ -412,7 +411,6 @@ const Dashboard: React.FC = () => {
       const tx1 = await approveUSDT(miningAmount); if ((tx1 as any)?.wait) await (tx1 as any).wait()
       const tx2 = await buyMiner(miningAmount); if ((tx2 as any)?.wait) await (tx2 as any).wait()
 
-      // Record purchase in backend (for daily coin credits + history)
       try {
         if ((tx2 as any)?.hash) {
           await recordMiningPurchase(account!, (tx2 as any).hash)
@@ -661,6 +659,15 @@ const Dashboard: React.FC = () => {
               <IconInfo />
             </button>
           </div>
+          {/* FIX: show the coin balance here */}
+          <div style={styles.balance}>{coinBalanceText}</div>
+          <button
+            style={{ ...styles.buttonGhost, ...styles.buttonGhostDisabled }}
+            disabled
+            title="Coming soon"
+          >
+            Withdraw (Coming Soon)
+          </button>
         </Surface>
       </div>
 
@@ -676,7 +683,6 @@ const Dashboard: React.FC = () => {
                 <div className="lxr-lexori-logo" style={{ fontSize: 22, fontWeight: 900, letterSpacing: 1 }}>LEXORI</div>
                 <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, color: colors.accent }}>MINING CARD</div>
               </div>
-              {/* Info button opens miner history modal */}
               <button
                 title="View Miner History"
                 aria-label="View Miner History"
