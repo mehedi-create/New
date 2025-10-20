@@ -76,7 +76,6 @@ async function ensureSchema(db: D1Database) {
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT
     )`,
-    // New: referral rewards ledger (ensures +5 only once per referred wallet)
     `CREATE TABLE IF NOT EXISTS referral_rewards (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       referred_wallet TEXT UNIQUE,
@@ -84,7 +83,6 @@ async function ensureSchema(db: D1Database) {
       reward_coins INTEGER DEFAULT 5,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     )`,
-    // New: mining purchases for daily coin credit
     `CREATE TABLE IF NOT EXISTS mining_purchases (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       wallet_address TEXT NOT NULL,
@@ -113,10 +111,8 @@ const PLATFORM_ABI = [
   'function addressToUserId(address) view returns (string)',
   'function referrerOf(address) view returns (address)',
   'function owner() view returns (address)',
-  // event needed for mining verification
   'event MinerPurchased(address indexed user, uint256 amount, uint256 startTime, uint256 endTime)',
 ]
-
 const MINER_PURCHASED_TOPIC = ethers.id('MinerPurchased(address,uint256,uint256,uint256)')
 const IFACE = new Interface(PLATFORM_ABI)
 
@@ -189,6 +185,10 @@ function daysBetweenInclusive(startDate: string, endDate: string) {
   const diffDays = Math.floor((b - a) / (24 * 3600 * 1000))
   return diffDays < 0 ? 0 : diffDays + 1
 }
+function nextUtcMidnightMs() {
+  const now = new Date()
+  return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0, 0)
+}
 
 // ---------- Chain profile helpers ----------
 async function getChainProfile(env: Bindings, address: string): Promise<{ userId: string; referrerId: string; referrerAddr?: string } | null> {
@@ -233,7 +233,6 @@ function coinsFromAmountRaw(raw: bigint): number {
 }
 
 async function creditMiningIfDue(db: D1Database, walletLower: string) {
-  // fetch purchases
   const res = await db
     .prepare('SELECT id, daily_coins, total_days, credited_days, start_date FROM mining_purchases WHERE wallet_address = ?')
     .bind(walletLower)
@@ -255,12 +254,10 @@ async function creditMiningIfDue(db: D1Database, walletLower: string) {
     const pendingDays = Math.max(0, eligibleDays - creditedDays)
 
     if (pendingDays > 0) {
-      // Update purchase progress
       updates.push(
         db.prepare('UPDATE mining_purchases SET credited_days = credited_days + ?, last_credit_date = ? WHERE id = ?')
           .bind(pendingDays, today, r.id)
       )
-      // Credit coins (if any)
       if (dailyCoins > 0) {
         totalCoinDelta += pendingDays * dailyCoins
       }
@@ -268,7 +265,6 @@ async function creditMiningIfDue(db: D1Database, walletLower: string) {
   }
 
   if (updates.length) {
-    // Apply purchase updates
     await db.batch(updates)
   }
   if (totalCoinDelta > 0) {
@@ -327,8 +323,7 @@ app.get('/api/debug/db/:address', async (c) => {
 // Health
 app.get('/api/health', (c) => c.json({ ok: true, time: Date.now() }))
 
-// Upsert user (signed) — idempotent (no 409 on inflight)
-// Now includes: first-time referral bonus (+5 coins) for referrer
+// Upsert user (signed) — includes referral bonus (+5) on first insert
 app.post('/api/users/upsert-from-chain', async (c) => {
   const cleanup = (key: string) => {
     inflightUpsert.delete(key)
@@ -345,7 +340,6 @@ app.post('/api/users/upsert-from-chain', async (c) => {
       return c.json({ error: 'Signature expired' }, 400)
     }
 
-    // light rate-limit + inflight dedup (return 200 instead of 429/409)
     const key = address.toLowerCase()
     const now = Date.now()
     const last = lastUpsertAt.get(key) || 0
@@ -376,20 +370,14 @@ app.post('/api/users/upsert-from-chain', async (c) => {
     })
 
     let referralBonus = { awarded: false, referrer: '' as string }
-    // First-time DB insert → award referrer +5 coins (only once per referred wallet)
     if (!existed && profile.referrerAddr && profile.referrerAddr !== ethers.ZeroAddress) {
       const refLower = profile.referrerAddr.toLowerCase()
-
-      // ensure referrer exists in DB
       await ensureUserInDb(c.env, profile.referrerAddr)
-
       const already = await c.env.DB
         .prepare('SELECT 1 FROM referral_rewards WHERE referred_wallet = ?')
         .bind(lower)
         .first()
-
       if (!already) {
-        // credit +5 to referrer
         await c.env.DB.batch([
           c.env.DB.prepare('UPDATE users SET coin_balance = coin_balance + 5 WHERE wallet_address = ?').bind(refLower),
           c.env.DB.prepare('INSERT INTO referral_rewards (referred_wallet, referrer_id, reward_coins) VALUES (?, ?, 5)')
@@ -407,7 +395,7 @@ app.post('/api/users/upsert-from-chain', async (c) => {
   }
 })
 
-// Daily login (signed) → +1 coin/day (auto-ensure user in DB) + mining catch-up
+// Daily login (signed) → +1 coin/day + mining catch-up
 app.post('/api/users/:address/login', async (c) => {
   try {
     const { address } = c.req.param()
@@ -423,7 +411,6 @@ app.post('/api/users/:address/login', async (c) => {
     const msg = buildUserAuthMessage(address, Number(timestamp))
     await verifySignedMessage(address, msg, signature)
 
-    // Ensure user exists in DB (fetch from chain if needed)
     const ok = await ensureUserInDb(c.env, address)
     if (!ok) return c.json({ error: 'Address not registered on-chain' }, 400)
 
@@ -437,13 +424,10 @@ app.post('/api/users/:address/login', async (c) => {
     if (!results || results.length === 0) {
       await c.env.DB.batch([
         c.env.DB.prepare('INSERT INTO logins (wallet_address, login_date) VALUES (?, ?)').bind(lower, loginDate),
-        c.env.DB
-          .prepare('UPDATE users SET coin_balance = coin_balance + 1 WHERE wallet_address = ?')
-          .bind(lower),
+        c.env.DB.prepare('UPDATE users SET coin_balance = coin_balance + 1 WHERE wallet_address = ?').bind(lower),
       ])
     }
 
-    // Also credit mining coins if any pending days
     const miningRes = await creditMiningIfDue(c.env.DB, lower)
 
     const row = await c.env.DB
@@ -451,14 +435,20 @@ app.post('/api/users/:address/login', async (c) => {
       .bind(lower)
       .first<{ cnt: number }>()
 
-    return c.json({ ok: true, total_login_days: row?.cnt || 0, mining_credited: miningRes.credited_coins || 0 })
+    return c.json({
+      ok: true,
+      total_login_days: row?.cnt || 0,
+      mining_credited: miningRes.credited_coins || 0,
+      today_claimed: true,
+      next_reset_utc_ms: nextUtcMidnightMs(),
+    })
   } catch (e: any) {
     console.error('POST /api/users/:address/login error:', e.stack || e.message)
     return c.json({ error: 'Server error' }, 500)
   }
 })
 
-// Record mining purchase (signed) — verify tx log → save purchase for daily credit
+// Record mining purchase (signed) — verify tx log → save purchase
 app.post('/api/mining/record-purchase', async (c) => {
   try {
     const body = await c.req.json<{ address: string; tx_hash: string; timestamp: number; signature: string }>()
@@ -476,7 +466,6 @@ app.post('/api/mining/record-purchase', async (c) => {
 
     const lower = address.toLowerCase()
 
-    // If already recorded, return ok
     const exists = await c.env.DB
       .prepare('SELECT id FROM mining_purchases WHERE tx_hash = ?')
       .bind(tx_hash)
@@ -487,7 +476,6 @@ app.post('/api/mining/record-purchase', async (c) => {
     const receipt = await provider.getTransactionReceipt(tx_hash)
     if (!receipt || receipt.status !== 1) return c.json({ error: 'Tx not found or failed' }, 400)
 
-    // Verify event emitted by our contract
     const contractAddr = ethers.getAddress(c.env.CONTRACT_ADDRESS)
     const log = (receipt.logs || []).find((lg: any) =>
       lg.address && ethers.getAddress(lg.address) === contractAddr && lg.topics && lg.topics[0] === MINER_PURCHASED_TOPIC
@@ -506,7 +494,6 @@ app.post('/api/mining/record-purchase', async (c) => {
     const dailyCoins = coinsFromAmountRaw(amountRaw)
     const startDate = isoDateFromUnix(startTime)
 
-    // Ensure user exists
     const ok = await ensureUserInDb(c.env, address)
     if (!ok) return c.json({ error: 'Address not registered on-chain (db)' }, 400)
 
@@ -516,7 +503,6 @@ app.post('/api/mining/record-purchase', async (c) => {
       .bind(lower, tx_hash, Math.max(0, dailyCoins), startDate)
       .run()
 
-    // Optional: immediate catch-up right after recording
     const miningRes = await creditMiningIfDue(c.env.DB, lower)
 
     return c.json({ ok: true, daily_coins: dailyCoins, credited_now: miningRes.credited_coins || 0 })
@@ -526,7 +512,7 @@ app.post('/api/mining/record-purchase', async (c) => {
   }
 })
 
-// Off-chain stats only (includes mining catch-up)
+// Off-chain stats (includes mining catch-up + today's claim status)
 app.get('/api/stats/:address', async (c) => {
   try {
     const { address } = c.req.param()
@@ -534,10 +520,7 @@ app.get('/api/stats/:address', async (c) => {
 
     const lower = address.toLowerCase()
 
-    // Ensure user exists silently if they already registered on-chain
     await ensureUserInDb(c.env, address)
-
-    // Run mining catch-up to reflect latest coin balance
     await creditMiningIfDue(c.env.DB, lower)
 
     const user = await c.env.DB
@@ -552,10 +535,22 @@ app.get('/api/stats/:address', async (c) => {
       .first<{ cnt: number }>()
     const totalLoginDays = loginRow?.cnt || 0
 
+    const today = todayISODate()
+    const todayRow = await c.env.DB
+      .prepare('SELECT 1 AS ok FROM logins WHERE wallet_address = ? AND login_date = ?')
+      .bind(lower, today)
+      .first<{ ok: number }>()
+    const todayClaimed = !!todayRow?.ok
+
     return c.json({
       userId: user.user_id,
       coin_balance: user.coin_balance || 0,
-      logins: { total_login_days: totalLoginDays },
+      logins: {
+        total_login_days: totalLoginDays,
+        today_claimed: todayClaimed,
+        today_date: today,
+        next_reset_utc_ms: nextUtcMidnightMs(),
+      },
     })
   } catch (e: any) {
     console.error('GET /api/stats/:address error:', e.stack || e.message)
@@ -612,7 +607,6 @@ app.post('/api/notices', async (c) => {
     if (!ethers.isAddress(address)) return c.json({ error: 'Invalid address' }, 400)
     if (!timestamp || !signature) return c.json({ error: 'Missing auth params' }, 400)
 
-    // simple verify
     const msg = `Admin action authorization
 Purpose: create_notice
 Address: ${ethers.getAddress(address)}
@@ -696,13 +690,11 @@ Timestamp: ${Number(timestamp)}`
   }
 })
 
-// ---------- Admin stats (read-only) ----------
-// Total users
+// ---------- Admin stats ----------
 app.get('/api/admin/overview', async (c) => {
   try {
     const row = await c.env.DB.prepare('SELECT COUNT(*) AS cnt FROM users').bind().first<{ cnt: number }>()
     const totalUsers = row?.cnt || 0
-    // Optional: total coins
     const sumRow = await c.env.DB.prepare('SELECT SUM(coin_balance) AS sumCoins FROM users').bind().first<{ sumCoins: number }>()
     const totalCoins = Number(sumRow?.sumCoins || 0)
     return c.json({ ok: true, total_users: totalUsers, total_coins: totalCoins })
@@ -712,7 +704,6 @@ app.get('/api/admin/overview', async (c) => {
   }
 })
 
-// Top referrers by count of referrals (DB)
 app.get('/api/admin/top-referrers', async (c) => {
   try {
     const url = new URL(c.req.url)
