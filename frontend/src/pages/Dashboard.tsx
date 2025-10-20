@@ -43,6 +43,8 @@ const colors = {
   grayLine: 'rgba(255,255,255,0.12)',
   accent: '#14b8a6',
   accentSoft: '#e0f5ed',
+  disabledBg: '#6b7280', // gray
+  disabledText: '#e5e7eb', // light gray
 }
 
 const styles: Record<string, React.CSSProperties> = {
@@ -87,10 +89,26 @@ const styles: Record<string, React.CSSProperties> = {
     background: `linear-gradient(45deg, ${colors.accent}, ${colors.accentSoft})`,
     color: '#0b1b3b', border: 'none', fontSize: 14, fontWeight: 800, cursor: 'pointer', padding: '0 12px', width: '100%',
     boxShadow: '0 4px 15px rgba(20,184,166,0.3)',
+    transition: 'background 0.2s ease, opacity 0.2s ease',
+  },
+  buttonDisabled: {
+    background: colors.disabledBg,
+    color: colors.disabledText,
+    cursor: 'not-allowed',
+    boxShadow: 'none',
+    opacity: 0.85,
   },
   buttonGhost: {
     height: 44, borderRadius: 10, background: 'rgba(255,255,255,0.06)', color: colors.text, border: `1px solid ${colors.grayLine}`,
     fontSize: 14, fontWeight: 800, cursor: 'pointer', padding: '0 12px', width: '100%',
+    transition: 'opacity 0.2s ease',
+  },
+  buttonGhostDisabled: {
+    background: 'rgba(255,255,255,0.08)',
+    color: colors.disabledText,
+    borderColor: colors.grayLine,
+    cursor: 'not-allowed',
+    opacity: 0.6,
   },
 
   iconBtnGhost: {
@@ -207,9 +225,7 @@ const fetchMinerHistoryFromChain = async (address: string): Promise<MinerPurchas
           })
         } catch {}
       }
-    } catch {
-      // ignore and continue
-    }
+    } catch {}
     await new Promise((r) => setTimeout(r, 80))
   }
 
@@ -289,14 +305,12 @@ const Dashboard: React.FC = () => {
   const [nextResetMs, setNextResetMs] = useState<number | null>(null)
   const [countdown, setCountdown] = useState<string>('')
 
-  // Hydrate from stats
   useEffect(() => {
     if (!stats?.logins) return
     setClaimedToday(Boolean(stats.logins.today_claimed))
     setNextResetMs(Number(stats.logins.next_reset_utc_ms || 0))
   }, [stats?.logins?.today_claimed, stats?.logins?.next_reset_utc_ms])
 
-  // Auto-reset at UTC 00:00 (based on backend-provided next_reset_utc_ms)
   const resetTimerRef = useRef<number | null>(null)
   useEffect(() => {
     if (!claimedToday || !nextResetMs) return
@@ -306,12 +320,9 @@ const Dashboard: React.FC = () => {
       setClaimedToday(false)
       await refetchStatsLite()
     }, delay)
-    return () => {
-      if (resetTimerRef.current) window.clearTimeout(resetTimerRef.current)
-    }
+    return () => { if (resetTimerRef.current) window.clearTimeout(resetTimerRef.current) }
   }, [claimedToday, nextResetMs, refetchStatsLite])
 
-  // Countdown text
   useEffect(() => {
     if (!claimedToday || !nextResetMs) { setCountdown(''); return }
     let id: number | null = null
@@ -352,9 +363,7 @@ const Dashboard: React.FC = () => {
           await upsertUserFromChain(account!, timestamp, signature)
           await refetchStatsLite()
         }
-      } catch {
-        // silent
-      } finally {
+      } catch {} finally {
         ensureRef.current.inFlight = false
         ensureRef.current.last = Date.now()
       }
@@ -419,7 +428,6 @@ const Dashboard: React.FC = () => {
     setIsProcessing(true)
     try {
       const { timestamp, signature } = await signAuthMessage(account!)
-      // Try markLogin; if 404, upsert then retry
       let resp: Awaited<ReturnType<typeof markLogin>> | null = null
       try {
         resp = await markLogin(account!, timestamp, signature)
@@ -432,14 +440,11 @@ const Dashboard: React.FC = () => {
           throw err
         }
       }
-
-      // Update local claim state instantly
       const data = resp?.data as any
       if (data) {
         setClaimedToday(Boolean(data.today_claimed))
         setNextResetMs(Number(data.next_reset_utc_ms || 0))
       }
-
       showSuccessToast('Login counted for today')
       await refetchStatsLite()
     } catch (e) {
@@ -461,8 +466,6 @@ const Dashboard: React.FC = () => {
     try {
       const tx1 = await approveUSDT(miningAmount); if ((tx1 as any)?.wait) await (tx1 as any).wait()
       const tx2 = await buyMiner(miningAmount); if ((tx2 as any)?.wait) await (tx2 as any).wait()
-
-      // Record purchase off-chain for daily coin credits
       try {
         if ((tx2 as any)?.hash) {
           await recordMiningPurchase(account!, (tx2 as any).hash)
@@ -470,7 +473,6 @@ const Dashboard: React.FC = () => {
       } catch (e) {
         showErrorToast(e, 'Purchase recorded on-chain, but off-chain credit setup failed. Please refresh.')
       }
-
       showSuccessToast(`Purchased $${Number(miningAmount).toFixed(2)} mining power`)
       queryClient.invalidateQueries({ queryKey: ['miningStats', account] })
       refetchStatsLite()
@@ -499,7 +501,11 @@ const Dashboard: React.FC = () => {
             <div style={styles.balance}>${safeMoney(onChainData?.userBalance)}</div>
           )}
           <div style={styles.row}>
-            <button style={styles.button} disabled={isProcessing || isOnChainLoading} onClick={handleUserPayout}>
+            <button
+              style={{ ...styles.button, ...(isProcessing || isOnChainLoading ? styles.buttonDisabled : {}) }}
+              disabled={isProcessing || isOnChainLoading}
+              onClick={handleUserPayout}
+            >
               Payout
             </button>
           </div>
@@ -607,7 +613,13 @@ const Dashboard: React.FC = () => {
               <button className="lxr-buy-btn" onClick={confirmWithdraw} disabled={isProcessing}>
                 {isProcessing ? 'PROCESSING...' : 'Withdraw'}
               </button>
-              <button style={styles.buttonGhost} onClick={() => setShowFundModal(false)} disabled={isProcessing}>Cancel</button>
+              <button
+                style={{ ...styles.buttonGhost, ...(isProcessing ? styles.buttonGhostDisabled : {}) }}
+                onClick={() => setShowFundModal(false)}
+                disabled={isProcessing}
+              >
+                Cancel
+              </button>
             </div>
           </div>
         </div>
@@ -705,7 +717,11 @@ const Dashboard: React.FC = () => {
             </button>
           </div>
           <div style={styles.balance}>{coinBalanceText}</div>
-          <button style={styles.buttonGhost} disabled>
+          <button
+            style={{ ...styles.buttonGhost, ...styles.buttonGhostDisabled }}
+            disabled
+            title="Coming soon"
+          >
             Withdraw (Coming Soon)
           </button>
         </Surface>
@@ -776,7 +792,7 @@ const Dashboard: React.FC = () => {
           </div>
           <div style={{ ...styles.row, marginTop: 8 }}>
             <button
-              style={styles.button}
+              style={{ ...styles.button, ...(!canClaimToday ? styles.buttonDisabled : {}) }}
               disabled={!canClaimToday}
               onClick={handleMarkTodayLogin}
               title={claimedToday ? 'Already signed today' : 'Mark Today’s Login'}
