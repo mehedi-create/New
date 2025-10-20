@@ -18,20 +18,27 @@ const colors = {
   textMuted: 'rgba(232,249,241,0.75)',
   grayLine: 'rgba(255,255,255,0.12)',
   accent: '#14b8a6',
-  accentSoft: '#e0f5ed',
 }
 
 const styles: Record<string, React.CSSProperties> = {
   shell: { background: 'transparent', border: 'none', padding: 0 },
   wrap: { position: 'relative', overflow: 'hidden', borderRadius: 12 },
-  header: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 10px', borderBottom: `1px solid ${colors.grayLine}` },
-  title: { fontWeight: 900, fontSize: 14, color: colors.text },
+  header: {
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    padding: '8px 10px', borderBottom: `1px solid ${colors.grayLine}`, color: colors.text,
+  },
+  title: { fontWeight: 900, fontSize: 14 },
+  small: { fontSize: 12, color: colors.textMuted },
+
   body: { minHeight: 140, display: 'grid', placeItems: 'center', padding: 10 },
-  img: { maxWidth: '100%', maxHeight: 160, display: 'block', borderRadius: 10, border: `1px solid ${colors.grayLine}` },
+  img: { maxWidth: '100%', maxHeight: 180, display: 'block', borderRadius: 10, border: `1px solid ${colors.grayLine}` },
   textBox: { width: '100%', color: colors.text, fontSize: 14 },
+  placeholder: { width: '100%', height: 140, borderRadius: 10, background: 'rgba(255,255,255,0.06)', border: `1px solid ${colors.grayLine}` },
+
   dots: { display: 'flex', gap: 6, alignItems: 'center', justifyContent: 'center', padding: '8px 0' },
   dot: { width: 8, height: 8, borderRadius: 8, background: 'rgba(255,255,255,0.25)', cursor: 'pointer' },
   dotActive: { background: colors.accent, width: 18 },
+
   arrow: {
     position: 'absolute', top: '50%', transform: 'translateY(-50%)',
     width: 32, height: 32, borderRadius: 8, display: 'grid', placeItems: 'center',
@@ -40,7 +47,6 @@ const styles: Record<string, React.CSSProperties> = {
   },
   arrowLeft: { left: 8 },
   arrowRight: { right: 8 },
-  small: { fontSize: 12, color: colors.textMuted },
 }
 
 const Surface: React.FC<{ children: React.ReactNode; style?: React.CSSProperties }> = ({ children, style }) => (
@@ -74,7 +80,7 @@ const NoticeCarousel: React.FC<{ autoIntervalMs?: number; limit?: number }> = ({
   const notices = useMemo(() => (data?.notices || []), [data])
   const count = notices.length
 
-  // hide completely if no notices
+  // no notices → hide block
   if (!isLoading && count === 0) return null
 
   const [index, setIndex] = useState(0)
@@ -119,18 +125,21 @@ const NoticeCarousel: React.FC<{ autoIntervalMs?: number; limit?: number }> = ({
     tmp.innerHTML = n.content_html || ''
 
     Array.from(tmp.childNodes).forEach((node) => {
-      const el = node as HTMLElement
-      if (el.tagName && el.tagName.toLowerCase() === 'script') {
+      if (!(node instanceof HTMLElement)) {
+        c.appendChild(node.cloneNode(true))
+        return
+      }
+      if (node.tagName.toLowerCase() === 'script') {
         const s = document.createElement('script')
-        const src = (el as HTMLScriptElement).src
+        const src = (node as HTMLScriptElement).src
         if (src) s.src = src
-        s.type = (el as HTMLScriptElement).type || 'text/javascript'
-        s.defer = (el as HTMLScriptElement).defer || false
-        s.async = (el as HTMLScriptElement).async || false
-        s.text = (el as HTMLScriptElement).text || el.innerHTML || ''
+        s.type = (node as HTMLScriptElement).type || 'text/javascript'
+        s.defer = (node as HTMLScriptElement).defer || false
+        s.async = (node as HTMLScriptElement).async || false
+        s.text = (node as HTMLScriptElement).text || node.innerHTML || ''
         c.appendChild(s)
       } else {
-        c.appendChild(el.cloneNode(true))
+        c.appendChild(node.cloneNode(true))
       }
     })
   }, [index, notices])
@@ -156,7 +165,7 @@ const NoticeCarousel: React.FC<{ autoIntervalMs?: number; limit?: number }> = ({
 
           <div style={styles.body}>
             {isLoading ? (
-              <div style={{ width: '100%', height: 120, borderRadius: 10, background: 'rgba(255,255,255,0.06)', border: `1px solid ${colors.grayLine}` }} />
+              <div style={styles.placeholder} />
             ) : active ? (
               active.kind === 'image' ? (
                 active.image_url ? (
