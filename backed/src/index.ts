@@ -97,7 +97,7 @@ async function ensureSchema(db: D1Database) {
   ]
   await db.batch(stmts.map((sql) => db.prepare(sql)))
 
-  // migrations
+  // migrations (ignore if exists)
   try { await db.prepare(`ALTER TABLE users ADD COLUMN coin_balance INTEGER DEFAULT 0`).run() } catch {}
   try { await db.prepare(`ALTER TABLE notices ADD COLUMN kind TEXT DEFAULT 'text'`).run() } catch {}
   try { await db.prepare(`ALTER TABLE notices ADD COLUMN expires_at TEXT`).run() } catch {}
@@ -187,24 +187,6 @@ function daysBetweenInclusive(startDate: string, endDate: string) {
   const diffDays = Math.floor((b - a) / (24 * 3600 * 1000))
   return diffDays < 0 ? 0 : diffDays + 1
 }
-function nextUtcMidnightMs() {
-  const now = new Date()
-  return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0, 0)
-}
-function nowISO() {
-  return new Date().toISOString()
-}
-function parseExpiry(body: any): string | null {
-  if (typeof body?.expires_in_sec === 'number' && body.expires_in_sec > 0) {
-    return new Date(Date.now() + Math.floor(body.expires_in_sec) * 1000).toISOString()
-  }
-  const raw = (body?.expires_at || '').trim?.()
-  if (raw) {
-    const t = new Date(raw)
-    if (!isNaN(t.getTime())) return t.toISOString()
-  }
-  return null
-}
 
 // ---------- Chain profile helpers ----------
 async function getChainProfile(env: Bindings, address: string): Promise<{ userId: string; referrerId: string; referrerAddr?: string } | null> {
@@ -241,12 +223,6 @@ async function ensureUserInDb(env: Bindings, address: string) {
 }
 
 // ---------- Mining helpers ----------
-function coinsFromAmountRaw(raw: bigint): number {
-  const c18 = Number(raw / 10n ** 18n)
-  const c6 = Number(raw / 10n ** 6n)
-  return Math.max(c18, c6)
-}
-
 async function creditMiningIfDue(db: D1Database, walletLower: string) {
   const res = await db
     .prepare('SELECT id, daily_coins, total_days, credited_days, start_date FROM mining_purchases WHERE wallet_address = ?')
@@ -455,7 +431,7 @@ app.post('/api/users/:address/login', async (c) => {
       total_login_days: row?.cnt || 0,
       mining_credited: miningRes.credited_coins || 0,
       today_claimed: true,
-      next_reset_utc_ms: nextUtcMidnightMs(),
+      next_reset_utc_ms: Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate() + 1, 0, 0, 0, 0),
     })
   } catch (e: any) {
     console.error('POST /api/users/:address/login error:', e.stack || e.message)
@@ -506,7 +482,12 @@ app.post('/api/mining/record-purchase', async (c) => {
       return c.json({ error: 'Event user mismatch' }, 400)
     }
 
-    const dailyCoins = coinsFromAmountRaw(amountRaw)
+    // NB: এখানে daily_coins == USD amount per day ধারণা অনুযায়ী সেভ করছি
+    // (USDT decimals issue আলাদা ফিক্সে করা হবে)
+    const dailyCoins = Number(amountRaw / 10n ** 18n) > 0
+      ? Number(amountRaw / 10n ** 18n)
+      : Number(amountRaw / 10n ** 6n)
+
     const startDate = isoDateFromUnix(startTime)
 
     const ok = await ensureUserInDb(c.env, address)
@@ -564,7 +545,7 @@ app.get('/api/stats/:address', async (c) => {
         total_login_days: totalLoginDays,
         today_claimed: todayClaimed,
         today_date: today,
-        next_reset_utc_ms: nextUtcMidnightMs(),
+        next_reset_utc_ms: Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate() + 1, 0, 0, 0, 0),
       },
     })
   } catch (e: any) {
@@ -573,7 +554,9 @@ app.get('/api/stats/:address', async (c) => {
   }
 })
 
-// ---------- Notices: Public list (respects expiry) ----------
+// ---------- Notices (public with expiry) ----------
+function nowISO() { return new Date().toISOString() }
+
 app.get('/api/notices', async (c) => {
   try {
     const url = new URL(c.req.url)
@@ -581,20 +564,16 @@ app.get('/api/notices', async (c) => {
     const onlyActive = url.searchParams.get('active') !== '0'
     const now = nowISO()
 
-    let stmt = ''
     if (onlyActive) {
-      stmt = `SELECT id, title, content_html, image_url, link_url, kind, priority, created_at, expires_at
-              FROM notices
-              WHERE is_active = 1 AND (expires_at IS NULL OR expires_at > ?)
-              ORDER BY priority DESC, id DESC
-              LIMIT ?`
+      const stmt = `SELECT id, title, content_html, image_url, link_url, kind, priority, created_at, expires_at
+                    FROM notices
+                    WHERE is_active = 1 AND (expires_at IS NULL OR expires_at > ?)
+                    ORDER BY priority DESC, id DESC LIMIT ?`
       const res = await c.env.DB.prepare(stmt).bind(now, limit).all()
       return c.json({ notices: (res.results || []) })
     } else {
-      stmt = `SELECT id, title, content_html, image_url, link_url, kind, priority, created_at, expires_at, is_active
-              FROM notices
-              ORDER BY priority DESC, id DESC
-              LIMIT ?`
+      const stmt = `SELECT id, title, content_html, image_url, link_url, kind, priority, created_at, expires_at, is_active
+                    FROM notices ORDER BY priority DESC, id DESC LIMIT ?`
       const res = await c.env.DB.prepare(stmt).bind(limit).all()
       return c.json({ notices: (res.results || []) })
     }
@@ -604,21 +583,19 @@ app.get('/api/notices', async (c) => {
   }
 })
 
-// ---------- Notices: create (owner only) ----------
+// ---------- Notices: create/update/delete/admin list ----------
 app.post('/api/notices', async (c) => {
   try {
     const body = await c.req.json<{
       address: string
       timestamp: number
       signature: string
-      // minimal fields
       image_url?: string
       link_url?: string
       content_html?: string
       kind?: 'image' | 'script'
       is_active?: boolean
       priority?: number
-      // expiry
       expires_in_sec?: number
       expires_at?: string
     }>()
@@ -636,17 +613,26 @@ Timestamp: ${Number(timestamp)}`
     const kind = ((body.kind || 'image') as 'image' | 'script')
     const is_active = body.is_active === false ? 0 : 1
     const priority = Number.isFinite(body.priority) ? Number(body.priority) : 0
-    const expires_at = parseExpiry(body)
+    const exp = (() => {
+      if (typeof body.expires_in_sec === 'number' && body.expires_in_sec > 0) {
+        return new Date(Date.now() + Math.floor(body.expires_in_sec) * 1000).toISOString()
+      }
+      const raw = (body.expires_at || '').trim?.()
+      if (raw) {
+        const dt = new Date(raw)
+        if (!isNaN(dt.getTime())) return dt.toISOString()
+      }
+      return null
+    })()
 
     let image_url = ''
     let link_url = ''
     let content_html = ''
-
     if (kind === 'image') {
       image_url = (body.image_url || '').trim()
       link_url = (body.link_url || '').trim()
       if (!image_url) return c.json({ error: 'image_url required for image notice' }, 400)
-    } else if (kind === 'script') {
+    } else {
       content_html = (body.content_html || '').trim()
       if (!content_html) return c.json({ error: 'content_html required for script notice' }, 400)
     }
@@ -655,7 +641,7 @@ Timestamp: ${Number(timestamp)}`
       `INSERT INTO notices (title, content_html, image_url, link_url, kind, is_active, priority, expires_at, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
-      .bind('', content_html, image_url, link_url, kind, is_active, priority, expires_at, new Date().toISOString())
+      .bind('', content_html, image_url, link_url, kind, is_active, priority, exp, new Date().toISOString())
       .run()
 
     return c.json({ ok: true })
@@ -665,7 +651,6 @@ Timestamp: ${Number(timestamp)}`
   }
 })
 
-// ---------- Notices: update (owner only) ----------
 app.patch('/api/notices/:id', async (c) => {
   try {
     const { id } = c.req.param()
@@ -695,17 +680,18 @@ Timestamp: ${Number(timestamp)}`
 
     const fields: string[] = []
     const values: any[] = []
-
     if (typeof body.image_url === 'string') { fields.push('image_url = ?'); values.push(body.image_url.trim()) }
     if (typeof body.link_url === 'string') { fields.push('link_url = ?'); values.push(body.link_url.trim()) }
     if (typeof body.content_html === 'string') { fields.push('content_html = ?'); values.push(body.content_html) }
     if (typeof body.priority === 'number') { fields.push('priority = ?'); values.push(Number(body.priority)) }
     if (typeof body.is_active === 'boolean') { fields.push('is_active = ?'); values.push(body.is_active ? 1 : 0) }
     if (typeof body.kind === 'string' && ['image', 'script'].includes(body.kind)) { fields.push('kind = ?'); values.push(body.kind) }
-
-    const exp = parseExpiry(body)
-    if (exp !== null) { fields.push('expires_at = ?'); values.push(exp) }
-
+    if (typeof body.expires_in_sec === 'number' && body.expires_in_sec > 0) {
+      fields.push('expires_at = ?'); values.push(new Date(Date.now() + Math.floor(body.expires_in_sec) * 1000).toISOString())
+    } else if (typeof body.expires_at === 'string') {
+      const dt = new Date(body.expires_at)
+      if (!isNaN(dt.getTime())) { fields.push('expires_at = ?'); values.push(dt.toISOString()) }
+    }
     fields.push('updated_at = ?'); values.push(new Date().toISOString())
 
     if (fields.length === 0) return c.json({ error: 'No fields to update' }, 400)
@@ -720,7 +706,6 @@ Timestamp: ${Number(timestamp)}`
   }
 })
 
-// ---------- Notices: delete (owner only) ----------
 app.delete('/api/notices/:id', async (c) => {
   try {
     const { id } = c.req.param()
@@ -744,7 +729,6 @@ Timestamp: ${Number(timestamp)}`
   }
 })
 
-// ---------- Admin: list notices (manage UI) ----------
 app.get('/api/admin/notices', async (c) => {
   try {
     const url = new URL(c.req.url)
@@ -756,6 +740,50 @@ app.get('/api/admin/notices', async (c) => {
     return c.json({ ok: true, notices: res.results || [] })
   } catch (e: any) {
     console.error('GET /api/admin/notices error:', e.stack || e.message)
+    return c.json({ error: 'Server error' }, 500)
+  }
+})
+
+// ---------- Mining: history (NEW) ----------
+app.get('/api/mining/history/:address', async (c) => {
+  try {
+    const { address } = c.req.param()
+    if (!ethers.isAddress(address)) return c.json({ error: 'Invalid wallet address' }, 400)
+    const lower = address.toLowerCase()
+
+    // ensure user exists silently (optional)
+    await ensureUserInDb(c.env, address)
+
+    const res = await c.env.DB
+      .prepare(`SELECT tx_hash, daily_coins, total_days, credited_days, start_date
+                FROM mining_purchases
+                WHERE wallet_address = ?
+                ORDER BY id DESC`)
+      .bind(lower)
+      .all<{ tx_hash: string; daily_coins: number; total_days: number; credited_days: number; start_date: string }>()
+
+    const items = (res.results || []).map((r) => {
+      const start = new Date(`${r.start_date}T00:00:00Z`).getTime()
+      const end = start + (Number(r.total_days || 30) * 24 * 3600 * 1000)
+      const now = Date.now()
+      const active = now < end
+      const days_left = Math.max(0, Math.ceil((end - now) / (24 * 3600 * 1000)))
+      return {
+        tx_hash: r.tx_hash || '',
+        amount_usd: Number(r.daily_coins || 0),
+        daily_coins: Number(r.daily_coins || 0),
+        start_date: r.start_date,
+        total_days: Number(r.total_days || 30),
+        credited_days: Number(r.credited_days || 0),
+        end_date: new Date(end).toISOString().slice(0, 10),
+        active,
+        days_left,
+      }
+    })
+
+    return c.json({ items })
+  } catch (e: any) {
+    console.error('GET /api/mining/history/:address error:', e?.stack || e?.message || e)
     return c.json({ error: 'Server error' }, 500)
   }
 })
