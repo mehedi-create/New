@@ -32,9 +32,10 @@ const styles: Record<string, React.CSSProperties> = {
 
   body: { minHeight: 140, display: 'grid', placeItems: 'center', padding: 10 },
   img: { maxWidth: '100%', maxHeight: 180, display: 'block', borderRadius: 10, border: `1px solid ${colors.grayLine}` },
-  textBox: { width: '100%', color: colors.text, fontSize: 14 },
+  textBox: { width: '100%', color: colors.text, fontSize: 14, lineHeight: 1.45 },
   placeholder: { width: '100%', height: 140, borderRadius: 10, background: 'rgba(255,255,255,0.06)', border: `1px solid ${colors.grayLine}` },
 
+  iframeBox: { width: '100%', height: 180, border: 'none' },
   dots: { display: 'flex', gap: 6, alignItems: 'center', justifyContent: 'center', padding: '8px 0' },
   dot: { width: 8, height: 8, borderRadius: 8, background: 'rgba(255,255,255,0.25)', cursor: 'pointer' },
   dotActive: { background: colors.accent, width: 18 },
@@ -114,37 +115,24 @@ const NoticeCarousel: React.FC<{ autoIntervalMs?: number; limit?: number }> = ({
     touchStartX.current = null
   }
 
-  // Script injection container
-  const scriptContainerRef = useRef<HTMLDivElement | null>(null)
-  useEffect(() => {
-    const n = notices[index]
-    if (!n || n.kind !== 'script' || !scriptContainerRef.current) return
-    const c = scriptContainerRef.current
-    c.innerHTML = ''
-    const tmp = document.createElement('div')
-    tmp.innerHTML = n.content_html || ''
-
-    Array.from(tmp.childNodes).forEach((node) => {
-      if (!(node instanceof HTMLElement)) {
-        c.appendChild(node.cloneNode(true))
-        return
-      }
-      if (node.tagName.toLowerCase() === 'script') {
-        const s = document.createElement('script')
-        const src = (node as HTMLScriptElement).src
-        if (src) s.src = src
-        s.type = (node as HTMLScriptElement).type || 'text/javascript'
-        s.defer = (node as HTMLScriptElement).defer || false
-        s.async = (node as HTMLScriptElement).async || false
-        s.text = (node as HTMLScriptElement).text || node.innerHTML || ''
-        c.appendChild(s)
-      } else {
-        c.appendChild(node.cloneNode(true))
-      }
-    })
-  }, [index, notices])
-
   const active = notices[index]
+
+  // Prepare sandboxed iframe document for script notices
+  const scriptHtml = useMemo(() => {
+    if (!active || active.kind !== 'script') return ''
+    const content = String(active.content_html || '')
+    // wrap into minimal HTML; disallow navigation, keep transparent bg
+    return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>html,body{margin:0;padding:0;background:transparent;color:#fff;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial}</style>
+  </head>
+  <body>
+    ${content}
+  </body>
+</html>`
+  }, [active])
 
   return (
     <div style={styles.shell}>
@@ -186,9 +174,13 @@ const NoticeCarousel: React.FC<{ autoIntervalMs?: number; limit?: number }> = ({
                   dangerouslySetInnerHTML={{ __html: active.content_html || '' }}
                 />
               ) : active.kind === 'script' ? (
-                <div style={{ width: '100%' }}>
-                  <div ref={scriptContainerRef} />
-                </div>
+                // IMPORTANT: sandboxed iframe to prevent breaking the app
+                <iframe
+                  title={`notice-${active.id}`}
+                  sandbox="allow-scripts"
+                  srcDoc={scriptHtml}
+                  style={styles.iframeBox}
+                />
               ) : (
                 <div style={styles.textBox}>Unsupported notice</div>
               )
