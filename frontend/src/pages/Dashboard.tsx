@@ -16,7 +16,6 @@ import {
 import { showSuccessToast, showErrorToast } from '../utils/notification'
 import { markLogin, getStats, type StatsResponse, upsertUserFromChain, recordMiningPurchase } from '../services/api'
 import { isValidAddress } from '../utils/wallet'
-import NoticeCarousel from '../components/NoticeCarousel'
 import { config } from '../config'
 import { ethers, JsonRpcProvider, Interface, zeroPadValue, formatUnits } from 'ethers'
 
@@ -43,8 +42,8 @@ const colors = {
   grayLine: 'rgba(255,255,255,0.12)',
   accent: '#14b8a6',
   accentSoft: '#e0f5ed',
-  disabledBg: '#6b7280', // gray
-  disabledText: '#e5e7eb', // light gray
+  disabledBg: '#6b7280',
+  disabledText: '#e5e7eb',
 }
 
 const styles: Record<string, React.CSSProperties> = {
@@ -131,7 +130,6 @@ const styles: Record<string, React.CSSProperties> = {
     padding: 12,
   },
 
-  // History modal table
   table: { width: '100%', borderCollapse: 'collapse' as const, color: colors.text },
   th: { textAlign: 'left' as const, padding: '8px 10px', borderBottom: `1px solid ${colors.grayLine}`, fontWeight: 900, fontSize: 13 },
   td: { padding: '8px 10px', borderBottom: `1px solid ${colors.grayLine}`, fontSize: 13 },
@@ -300,7 +298,7 @@ const Dashboard: React.FC = () => {
     },
   })
 
-  // ---------- Claim state (today) ----------
+  // ---------- Claim state ----------
   const [claimedToday, setClaimedToday] = useState<boolean>(false)
   const [nextResetMs, setNextResetMs] = useState<number | null>(null)
   const [countdown, setCountdown] = useState<string>('')
@@ -339,7 +337,7 @@ const Dashboard: React.FC = () => {
     return () => { if (id) window.clearInterval(id) }
   }, [claimedToday, nextResetMs])
 
-  // ---------- Auto-sync: on-chain registered but off-chain missing → silent upsert ----------
+  // ---------- Auto-sync off-chain profile ----------
   const ensureRef = useRef<{ inFlight: boolean; last: number }>({ inFlight: false, last: 0 })
   useEffect(() => {
     if (!isValidAddress(account)) return
@@ -484,7 +482,6 @@ const Dashboard: React.FC = () => {
     }
   }
 
-  // Helper: compute button state + label
   const canClaimToday = isValidAddress(account) && !isProcessing && !claimedToday
   const claimBtnLabel = claimedToday ? `Already signed${countdown ? ` • Resets in ${countdown}` : ''}` : 'Mark Today’s Login'
 
@@ -517,12 +514,7 @@ const Dashboard: React.FC = () => {
         </Surface>
       </div>
 
-      {/* Notice slider (between Balance and Share & Earn) */}
-      <div style={styles.cardShell}>
-        <NoticeCarousel autoIntervalMs={5000} limit={10} />
-      </div>
-
-      {/* Share & Earn card */}
+      {/* Share & Earn card (Notice slider removed temporarily) */}
       <div style={styles.cardShell}>
         <Surface>
           <h3 style={styles.cardTitle}>Share & Earn</h3>
@@ -627,7 +619,6 @@ const Dashboard: React.FC = () => {
     )
   }
 
-  // Miner history modal
   const renderHistoryModal = () => {
     if (!showHistory) return null
     return (
@@ -739,7 +730,6 @@ const Dashboard: React.FC = () => {
                 <div className="lxr-lexori-logo" style={{ fontSize: 22, fontWeight: 900, letterSpacing: 1 }}>LEXORI</div>
                 <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, color: colors.accent }}>MINING CARD</div>
               </div>
-              {/* Info button opens miner history modal (replaces old L badge) */}
               <button
                 title="View Miner History"
                 aria-label="View Miner History"
