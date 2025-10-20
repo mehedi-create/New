@@ -16,6 +16,7 @@ import {
 import { showSuccessToast, showErrorToast } from '../utils/notification'
 import { markLogin, getStats, type StatsResponse, upsertUserFromChain, recordMiningPurchase } from '../services/api'
 import { isValidAddress } from '../utils/wallet'
+import NoticeCarousel from '../components/NoticeCarousel'
 import { config } from '../config'
 import { ethers, JsonRpcProvider, Interface, zeroPadValue, formatUnits } from 'ethers'
 
@@ -176,12 +177,10 @@ const getCookie = (name: string): string | null => {
   return null
 }
 
-// Fetch miner purchase history directly from chain
+// Fetch miner purchase history directly from chain (for modal)
 const fetchMinerHistoryFromChain = async (address: string): Promise<MinerPurchaseItem[]> => {
   const provider = new JsonRpcProvider(config.readRpcUrl)
-  const ABI = [
-    'event MinerPurchased(address indexed user, uint256 amount, uint256 startTime, uint256 endTime)',
-  ]
+  const ABI = ['event MinerPurchased(address indexed user, uint256 amount, uint256 startTime, uint256 endTime)']
   const IFACE = new Interface(ABI)
   const TOPIC = ethers.id('MinerPurchased(address,uint256,uint256,uint256)')
   const user = ethers.getAddress(address)
@@ -197,12 +196,7 @@ const fetchMinerHistoryFromChain = async (address: string): Promise<MinerPurchas
   for (let from = fromBlock; from <= latest; from += step + 1) {
     const to = Math.min(from + step, latest)
     try {
-      const logs = await provider.getLogs({
-        address: config.contractAddress,
-        fromBlock: from,
-        toBlock: to,
-        topics: [TOPIC, paddedUser],
-      })
+      const logs = await provider.getLogs({ address: config.contractAddress, fromBlock: from, toBlock: to, topics: [TOPIC, paddedUser] })
       for (const lg of logs) {
         try {
           const parsed = IFACE.parseLog(lg)
@@ -226,7 +220,6 @@ const fetchMinerHistoryFromChain = async (address: string): Promise<MinerPurchas
     } catch {}
     await new Promise((r) => setTimeout(r, 80))
   }
-
   items.sort((a, b) => b.startTime - a.startTime)
   return items
 }
@@ -248,7 +241,7 @@ const Dashboard: React.FC = () => {
     return () => { document.removeEventListener('mousedown', onDocClick); document.removeEventListener('keydown', onKey) }
   }, [])
 
-  // ---------- On-chain data ----------
+  // On-chain data
   const { data: onChainData, isLoading: isOnChainLoading } = useQuery<OnChainData | null>({
     queryKey: ['onChainData', account],
     enabled: isValidAddress(account),
@@ -256,14 +249,12 @@ const Dashboard: React.FC = () => {
     retry: 1,
     queryFn: async () => {
       if (!isValidAddress(account)) return null
-      const [balance, hasCode, fee] = await Promise.all([
-        getUserBalance(account!), hasSetFundCode(account!), getRegistrationFee(),
-      ])
+      const [balance, hasCode, fee] = await Promise.all([getUserBalance(account!), hasSetFundCode(account!), getRegistrationFee()])
       return { userBalance: balance, hasFundCode: hasCode, registrationFee: fee }
     },
   })
 
-  // ---------- Referrals ----------
+  // Referrals
   const { data: referralList = [], isLoading: isRefsLoading } = useQuery<string[]>({
     queryKey: ['referralsL1', account],
     enabled: isValidAddress(account),
@@ -274,7 +265,7 @@ const Dashboard: React.FC = () => {
     },
   })
 
-  // ---------- Mining stats ----------
+  // Mining stats
   useQuery<{ count: number; totalDeposited: string }>({
     queryKey: ['miningStats', account],
     enabled: isValidAddress(account),
@@ -285,7 +276,7 @@ const Dashboard: React.FC = () => {
     },
   })
 
-  // ---------- Off-chain stats (lite) ----------
+  // Off-chain stats
   const { data: stats, isLoading: _isStatsLoading, refetch: refetchStatsLite } = useQuery<StatsResponse | null>({
     queryKey: ['stats-lite', account],
     enabled: isValidAddress(account),
@@ -298,7 +289,7 @@ const Dashboard: React.FC = () => {
     },
   })
 
-  // ---------- Claim state ----------
+  // Claim state
   const [claimedToday, setClaimedToday] = useState<boolean>(false)
   const [nextResetMs, setNextResetMs] = useState<number | null>(null)
   const [countdown, setCountdown] = useState<string>('')
@@ -337,7 +328,7 @@ const Dashboard: React.FC = () => {
     return () => { if (id) window.clearInterval(id) }
   }, [claimedToday, nextResetMs])
 
-  // ---------- Auto-sync off-chain profile ----------
+  // Auto-sync off-chain profile
   const ensureRef = useRef<{ inFlight: boolean; last: number }>({ inFlight: false, last: 0 })
   useEffect(() => {
     if (!isValidAddress(account)) return
@@ -377,7 +368,7 @@ const Dashboard: React.FC = () => {
   const copyToClipboard = (text: string) => { navigator.clipboard.writeText(text); showSuccessToast('Copied to clipboard') }
   const coinBalanceText = Number(stats?.coin_balance ?? 0).toFixed(2)
 
-  // ---------- Modals ----------
+  // Modals
   const [showCoinInfo, setShowCoinInfo] = useState(false)
   const [showFundModal, setShowFundModal] = useState(false)
   const [fundCode, setFundCode] = useState('')
@@ -415,7 +406,7 @@ const Dashboard: React.FC = () => {
     },
   })
 
-  // ---------- Actions ----------
+  // Actions
   const handleUserPayout = () => {
     if (!onChainData?.hasFundCode) { showErrorToast('Fund code not set. Please register with a fund code.'); return }
     openFundModal()
@@ -485,7 +476,7 @@ const Dashboard: React.FC = () => {
   const canClaimToday = isValidAddress(account) && !isProcessing && !claimedToday
   const claimBtnLabel = claimedToday ? `Already signed${countdown ? ` • Resets in ${countdown}` : ''}` : 'Mark Today’s Login'
 
-  // ---------- Renderers ----------
+  // Renderers
   const renderHome = () => (
     <div style={styles.grid}>
       {/* Balance card */}
@@ -514,7 +505,12 @@ const Dashboard: React.FC = () => {
         </Surface>
       </div>
 
-      {/* Share & Earn card (Notice slider removed temporarily) */}
+      {/* Notice slider (safe: image + sandboxed script) */}
+      <div style={styles.cardShell}>
+        <NoticeCarousel autoIntervalMs={5000} limit={10} />
+      </div>
+
+      {/* Share & Earn card */}
       <div style={styles.cardShell}>
         <Surface>
           <h3 style={styles.cardTitle}>Share & Earn</h3>
