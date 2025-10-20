@@ -1,7 +1,7 @@
 // backend/src/index.ts
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
-import { ethers, JsonRpcProvider, Contract } from 'ethers'
+import { ethers, JsonRpcProvider, Contract, Interface } from 'ethers'
 
 // ---------- Env Bindings ----------
 type Bindings = {
@@ -76,6 +76,25 @@ async function ensureSchema(db: D1Database) {
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT
     )`,
+    // New: referral rewards ledger (ensures +5 only once per referred wallet)
+    `CREATE TABLE IF NOT EXISTS referral_rewards (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      referred_wallet TEXT UNIQUE,
+      referrer_id TEXT,
+      reward_coins INTEGER DEFAULT 5,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )`,
+    // New: mining purchases for daily coin credit
+    `CREATE TABLE IF NOT EXISTS mining_purchases (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      wallet_address TEXT NOT NULL,
+      tx_hash TEXT UNIQUE,
+      daily_coins INTEGER NOT NULL,
+      total_days INTEGER DEFAULT 30,
+      credited_days INTEGER DEFAULT 0,
+      start_date TEXT NOT NULL,
+      last_credit_date TEXT
+    )`,
   ]
   await db.batch(stmts.map((sql) => db.prepare(sql)))
 
@@ -94,7 +113,12 @@ const PLATFORM_ABI = [
   'function addressToUserId(address) view returns (string)',
   'function referrerOf(address) view returns (address)',
   'function owner() view returns (address)',
+  // event needed for mining verification
+  'event MinerPurchased(address indexed user, uint256 amount, uint256 startTime, uint256 endTime)',
 ]
+
+const MINER_PURCHASED_TOPIC = ethers.id('MinerPurchased(address,uint256,uint256,uint256)')
+const IFACE = new Interface(PLATFORM_ABI)
 
 function getProvider(env: Bindings): JsonRpcProvider {
   const url = (env.BSC_RPC_URL || '').replace(/\/+$/, '')
@@ -155,9 +179,19 @@ async function upsertDbUser(
 function todayISODate() {
   return new Date().toISOString().slice(0, 10)
 }
+function isoDateFromUnix(sec: number) {
+  return new Date(sec * 1000).toISOString().slice(0, 10)
+}
+function daysBetweenInclusive(startDate: string, endDate: string) {
+  const a = new Date(`${startDate}T00:00:00Z`).getTime()
+  const b = new Date(`${endDate}T00:00:00Z`).getTime()
+  if (isNaN(a) || isNaN(b)) return 0
+  const diffDays = Math.floor((b - a) / (24 * 3600 * 1000))
+  return diffDays < 0 ? 0 : diffDays + 1
+}
 
 // ---------- Chain profile helpers ----------
-async function getChainProfile(env: Bindings, address: string): Promise<{ userId: string; referrerId: string } | null> {
+async function getChainProfile(env: Bindings, address: string): Promise<{ userId: string; referrerId: string; referrerAddr?: string } | null> {
   const provider = getProvider(env)
   const contract = getContract(env, provider)
   const [registered, userId, refAddr] = await Promise.all([
@@ -170,7 +204,7 @@ async function getChainProfile(env: Bindings, address: string): Promise<{ userId
   if (refAddr && refAddr !== ethers.ZeroAddress) {
     try { referrerId = await contract.addressToUserId(refAddr) } catch {}
   }
-  return { userId, referrerId }
+  return { userId, referrerId, referrerAddr: refAddr }
 }
 
 async function ensureUserInDb(env: Bindings, address: string) {
@@ -188,6 +222,62 @@ async function ensureUserInDb(env: Bindings, address: string) {
     referrerId: profile.referrerId || '',
   })
   return true
+}
+
+// ---------- Mining helpers ----------
+function coinsFromAmountRaw(raw: bigint): number {
+  // Works for 6 or 18 decimals; take the larger integer
+  const c18 = Number(raw / 10n ** 18n)
+  const c6 = Number(raw / 10n ** 6n)
+  return Math.max(c18, c6)
+}
+
+async function creditMiningIfDue(db: D1Database, walletLower: string) {
+  // fetch purchases
+  const res = await db
+    .prepare('SELECT id, daily_coins, total_days, credited_days, start_date FROM mining_purchases WHERE wallet_address = ?')
+    .bind(walletLower)
+    .all<{ id: number; daily_coins: number; total_days: number; credited_days: number; start_date: string }>()
+  const rows = res.results || []
+  if (!rows.length) return { credited_coins: 0 }
+
+  const today = todayISODate()
+  let totalCoinDelta = 0
+  const updates: D1PreparedStatement[] = []
+
+  for (const r of rows) {
+    const maxDays = Math.max(0, Number(r.total_days || 30))
+    const creditedDays = Math.max(0, Number(r.credited_days || 0))
+    const dailyCoins = Math.max(0, Number(r.daily_coins || 0))
+
+    const elapsed = daysBetweenInclusive(r.start_date, today)
+    const eligibleDays = Math.min(elapsed, maxDays)
+    const pendingDays = Math.max(0, eligibleDays - creditedDays)
+
+    if (pendingDays > 0) {
+      // Update purchase progress
+      updates.push(
+        db.prepare('UPDATE mining_purchases SET credited_days = credited_days + ?, last_credit_date = ? WHERE id = ?')
+          .bind(pendingDays, today, r.id)
+      )
+      // Credit coins (if any)
+      if (dailyCoins > 0) {
+        totalCoinDelta += pendingDays * dailyCoins
+      }
+    }
+  }
+
+  if (updates.length) {
+    // Apply purchase updates
+    await db.batch(updates)
+  }
+  if (totalCoinDelta > 0) {
+    await db
+      .prepare('UPDATE users SET coin_balance = coin_balance + ? WHERE wallet_address = ?')
+      .bind(totalCoinDelta, walletLower)
+      .run()
+  }
+  return { credited_coins: totalCoinDelta }
 }
 
 // ---------- Debug endpoints ----------
@@ -238,6 +328,7 @@ app.get('/api/debug/db/:address', async (c) => {
 app.get('/api/health', (c) => c.json({ ok: true, time: Date.now() }))
 
 // Upsert user (signed) — idempotent (no 409 on inflight)
+// Now includes: first-time referral bonus (+5 coins) for referrer
 app.post('/api/users/upsert-from-chain', async (c) => {
   const cleanup = (key: string) => {
     inflightUpsert.delete(key)
@@ -269,6 +360,12 @@ app.post('/api/users/upsert-from-chain', async (c) => {
     const msg = buildUserAuthMessage(address, Number(timestamp))
     await verifySignedMessage(address, msg, signature)
 
+    const lower = address.toLowerCase()
+    const existed = await c.env.DB
+      .prepare('SELECT 1 FROM users WHERE wallet_address = ?')
+      .bind(lower)
+      .first()
+
     const profile = await getChainProfile(c.env, address)
     if (!profile) { cleanup(key); return c.json({ error: 'Address not registered on-chain' }, 400) }
 
@@ -278,15 +375,39 @@ app.post('/api/users/upsert-from-chain', async (c) => {
       referrerId: profile.referrerId || '',
     })
 
+    let referralBonus = { awarded: false, referrer: '' as string }
+    // First-time DB insert → award referrer +5 coins (only once per referred wallet)
+    if (!existed && profile.referrerAddr && profile.referrerAddr !== ethers.ZeroAddress) {
+      const refLower = profile.referrerAddr.toLowerCase()
+
+      // ensure referrer exists in DB
+      await ensureUserInDb(c.env, profile.referrerAddr)
+
+      const already = await c.env.DB
+        .prepare('SELECT 1 FROM referral_rewards WHERE referred_wallet = ?')
+        .bind(lower)
+        .first()
+
+      if (!already) {
+        // credit +5 to referrer
+        await c.env.DB.batch([
+          c.env.DB.prepare('UPDATE users SET coin_balance = coin_balance + 5 WHERE wallet_address = ?').bind(refLower),
+          c.env.DB.prepare('INSERT INTO referral_rewards (referred_wallet, referrer_id, reward_coins) VALUES (?, ?, 5)')
+            .bind(lower, (profile.referrerId || '').toUpperCase()),
+        ])
+        referralBonus = { awarded: true, referrer: refLower }
+      }
+    }
+
     cleanup(key)
-    return c.json({ ok: true, userId: profile.userId, referrerId: profile.referrerId || '' })
+    return c.json({ ok: true, userId: profile.userId, referrerId: profile.referrerId || '', referral_bonus: referralBonus })
   } catch (e: any) {
     console.error('POST /api/users/upsert-from-chain error:', e.stack || e.message)
     return c.json({ error: 'Server error' }, 500)
   }
 })
 
-// Daily login (signed) → +1 coin/day (auto-ensure user in DB)
+// Daily login (signed) → +1 coin/day (auto-ensure user in DB) + mining catch-up
 app.post('/api/users/:address/login', async (c) => {
   try {
     const { address } = c.req.param()
@@ -322,25 +443,103 @@ app.post('/api/users/:address/login', async (c) => {
       ])
     }
 
+    // Also credit mining coins if any pending days
+    const miningRes = await creditMiningIfDue(c.env.DB, lower)
+
     const row = await c.env.DB
       .prepare('SELECT COUNT(*) AS cnt FROM logins WHERE wallet_address = ?')
       .bind(lower)
       .first<{ cnt: number }>()
 
-    return c.json({ ok: true, total_login_days: row?.cnt || 0 })
+    return c.json({ ok: true, total_login_days: row?.cnt || 0, mining_credited: miningRes.credited_coins || 0 })
   } catch (e: any) {
     console.error('POST /api/users/:address/login error:', e.stack || e.message)
     return c.json({ error: 'Server error' }, 500)
   }
 })
 
-// Off-chain stats only
+// Record mining purchase (signed) — verify tx log → save purchase for daily credit
+app.post('/api/mining/record-purchase', async (c) => {
+  try {
+    const body = await c.req.json<{ address: string; tx_hash: string; timestamp: number; signature: string }>()
+    const { address, tx_hash, timestamp, signature } = body || ({} as any)
+
+    if (!ethers.isAddress(address)) return c.json({ error: 'Invalid wallet address' }, 400)
+    if (!tx_hash || typeof tx_hash !== 'string') return c.json({ error: 'Missing tx_hash' }, 400)
+    if (!timestamp || !signature) return c.json({ error: 'Missing auth params' }, 400)
+
+    const nowSec = Math.floor(Date.now() / 1000)
+    if (Math.abs(nowSec - Number(timestamp)) > 300) return c.json({ error: 'Signature expired' }, 400)
+
+    const msg = buildUserAuthMessage(address, Number(timestamp))
+    await verifySignedMessage(address, msg, signature)
+
+    const lower = address.toLowerCase()
+
+    // If already recorded, return ok
+    const exists = await c.env.DB
+      .prepare('SELECT id FROM mining_purchases WHERE tx_hash = ?')
+      .bind(tx_hash)
+      .first()
+    if (exists) return c.json({ ok: true, recorded: true })
+
+    const provider = getProvider(c.env)
+    const receipt = await provider.getTransactionReceipt(tx_hash)
+    if (!receipt || receipt.status !== 1) return c.json({ error: 'Tx not found or failed' }, 400)
+
+    // Verify event emitted by our contract
+    const contractAddr = ethers.getAddress(c.env.CONTRACT_ADDRESS)
+    const log = (receipt.logs || []).find((lg: any) =>
+      lg.address && ethers.getAddress(lg.address) === contractAddr && lg.topics && lg.topics[0] === MINER_PURCHASED_TOPIC
+    )
+    if (!log) return c.json({ error: 'MinerPurchased event not found in tx' }, 400)
+
+    const parsed = IFACE.parseLog({ topics: log.topics, data: log.data })
+    const userAddr = ethers.getAddress(parsed.args.user as string)
+    const amountRaw = BigInt(parsed.args.amount.toString())
+    const startTime = Number(parsed.args.startTime)
+
+    if (ethers.getAddress(userAddr) !== ethers.getAddress(address)) {
+      return c.json({ error: 'Event user mismatch' }, 400)
+    }
+
+    const dailyCoins = coinsFromAmountRaw(amountRaw)
+    const startDate = isoDateFromUnix(startTime)
+
+    // Ensure user exists
+    const ok = await ensureUserInDb(c.env, address)
+    if (!ok) return c.json({ error: 'Address not registered on-chain (db)' }, 400)
+
+    await c.env.DB
+      .prepare(`INSERT INTO mining_purchases (wallet_address, tx_hash, daily_coins, total_days, credited_days, start_date)
+                VALUES (?, ?, ?, 30, 0, ?)`)
+      .bind(lower, tx_hash, Math.max(0, dailyCoins), startDate)
+      .run()
+
+    // Optional: immediate catch-up right after recording
+    const miningRes = await creditMiningIfDue(c.env.DB, lower)
+
+    return c.json({ ok: true, daily_coins: dailyCoins, credited_now: miningRes.credited_coins || 0 })
+  } catch (e: any) {
+    console.error('POST /api/mining/record-purchase error:', e.stack || e.message)
+    return c.json({ error: 'Server error' }, 500)
+  }
+})
+
+// Off-chain stats only (includes mining catch-up)
 app.get('/api/stats/:address', async (c) => {
   try {
     const { address } = c.req.param()
     if (!ethers.isAddress(address)) return c.json({ error: 'Invalid wallet address' }, 400)
 
     const lower = address.toLowerCase()
+
+    // Ensure user exists silently if they already registered on-chain
+    await ensureUserInDb(c.env, address)
+
+    // Run mining catch-up to reflect latest coin balance
+    await creditMiningIfDue(c.env.DB, lower)
+
     const user = await c.env.DB
       .prepare('SELECT user_id, coin_balance FROM users WHERE wallet_address = ?')
       .bind(lower)
@@ -493,6 +692,48 @@ Timestamp: ${Number(timestamp)}`
     return c.json({ ok: true })
   } catch (e: any) {
     console.error('PATCH /api/notices/:id error:', e.stack || e.message)
+    return c.json({ error: 'Server error' }, 500)
+  }
+})
+
+// ---------- Admin stats (read-only) ----------
+// Total users
+app.get('/api/admin/overview', async (c) => {
+  try {
+    const row = await c.env.DB.prepare('SELECT COUNT(*) AS cnt FROM users').bind().first<{ cnt: number }>()
+    const totalUsers = row?.cnt || 0
+    // Optional: total coins
+    const sumRow = await c.env.DB.prepare('SELECT SUM(coin_balance) AS sumCoins FROM users').bind().first<{ sumCoins: number }>()
+    const totalCoins = Number(sumRow?.sumCoins || 0)
+    return c.json({ ok: true, total_users: totalUsers, total_coins: totalCoins })
+  } catch (e: any) {
+    console.error('GET /api/admin/overview error:', e.stack || e.message)
+    return c.json({ error: 'Server error' }, 500)
+  }
+})
+
+// Top referrers by count of referrals (DB)
+app.get('/api/admin/top-referrers', async (c) => {
+  try {
+    const url = new URL(c.req.url)
+    const limit = Math.min(Math.max(Number(url.searchParams.get('limit') || '10'), 1), 50)
+    const res = await c.env.DB.prepare(
+      `SELECT u.referrer_id AS user_id, u2.wallet_address AS address, COUNT(*) AS referrals
+       FROM users u
+       LEFT JOIN users u2 ON u2.user_id = u.referrer_id
+       WHERE u.referrer_id IS NOT NULL AND u.referrer_id <> ''
+       GROUP BY u.referrer_id
+       ORDER BY referrals DESC
+       LIMIT ?`
+    ).bind(limit).all<{ user_id: string; address: string | null; referrals: number }>()
+    const list = (res.results || []).map(r => ({
+      address: (r.address || '').toLowerCase(),
+      userId: (r.user_id || '').toUpperCase(),
+      count: Number(r.referrals || 0),
+    }))
+    return c.json({ ok: true, top: list })
+  } catch (e: any) {
+    console.error('GET /api/admin/top-referrers error:', e.stack || e.message)
     return c.json({ error: 'Server error' }, 500)
   }
 })
