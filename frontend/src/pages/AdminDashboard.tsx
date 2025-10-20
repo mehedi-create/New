@@ -51,7 +51,8 @@ const styles: Record<string, React.CSSProperties> = {
   },
   dropdown: {
     position: 'absolute', right: 0, top: 40, background: 'rgba(15,31,63,0.98)',
-    border: `1px solid ${colors.grayLine}`, borderRadius: 10, boxShadow: '0 10px 24px rgba(0,0,0,0.35)`,
+    border: `1px solid ${colors.grayLine}`, borderRadius: 10,
+    boxShadow: '0 10px 24px rgba(0,0,0,0.35)',
     padding: 6, minWidth: 140, zIndex: 100, backdropFilter: 'blur(8px)', color: colors.text,
   },
   dropdownItem: {
