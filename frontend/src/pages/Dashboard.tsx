@@ -11,11 +11,12 @@ import {
   getUserMiningStats,
   getRegistrationFee,
   getLevel1ReferralIdsFromChain,
-  isRegistered, // NEW
+  isRegistered,
 } from '../utils/contract'
 import { showSuccessToast, showErrorToast } from '../utils/notification'
-import { markLogin, getStats, type StatsResponse, upsertUserFromChain } from '../services/api' // UPDATED
+import { markLogin, getStats, type StatsResponse, upsertUserFromChain } from '../services/api'
 import { isValidAddress } from '../utils/wallet'
+import NoticeCarousel from '../components/NoticeCarousel' // NEW
 
 type OnChainData = {
   userBalance: string
@@ -207,7 +208,7 @@ const Dashboard: React.FC = () => {
     },
   })
 
-  // ---------- Auto-sync: on-chain registered but off-chain missing → silent upsert ----------
+  // ---------- Auto-sync off-chain profile ----------
   const ensureRef = useRef<{ inFlight: boolean; last: number }>({ inFlight: false, last: 0 })
   useEffect(() => {
     if (!isValidAddress(account)) return
@@ -224,7 +225,7 @@ const Dashboard: React.FC = () => {
           exists = !!res?.data?.userId
         } catch (e: any) {
           const status = e?.response?.status || e?.status
-          if (status !== 404) return // অন্য এরর হলে সাইলেন্ট
+          if (status !== 404) return
         }
         if (!exists) {
           const { timestamp, signature } = await signAuthMessage(account!)
@@ -286,13 +287,11 @@ const Dashboard: React.FC = () => {
     setIsProcessing(true)
     try {
       const { timestamp, signature } = await signAuthMessage(account!)
-      // First try markLogin
       try {
         await markLogin(account!, timestamp, signature)
       } catch (err: any) {
         const status = err?.response?.status || err?.status
         if (status === 404) {
-          // upsert silently then retry
           await upsertUserFromChain(account!, timestamp, signature)
           await markLogin(account!, timestamp, signature)
         } else {
@@ -328,6 +327,7 @@ const Dashboard: React.FC = () => {
   // ---------- Renderers ----------
   const renderHome = () => (
     <div style={styles.grid}>
+      {/* Balance card */}
       <div style={styles.cardShell}>
         <Surface>
           <h3 style={styles.cardTitle}>Available Balance</h3>
@@ -349,6 +349,12 @@ const Dashboard: React.FC = () => {
         </Surface>
       </div>
 
+      {/* Notice slider (between Balance and Share & Earn) */}
+      <div style={styles.cardShell}>
+        <NoticeCarousel autoIntervalMs={5000} limit={10} />
+      </div>
+
+      {/* Share & Earn card */}
       <div style={styles.cardShell}>
         <Surface>
           <h3 style={styles.cardTitle}>Share & Earn</h3>
@@ -449,7 +455,6 @@ const Dashboard: React.FC = () => {
 
   const renderSurprise = () => (
     <div style={styles.grid}>
-      {/* Total coins with 0.00 format + disabled withdraw */}
       <div style={styles.cardShell}>
         <Surface>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -465,7 +470,6 @@ const Dashboard: React.FC = () => {
         </Surface>
       </div>
 
-      {/* Mining card unchanged */}
       <div style={styles.cardShell}>
         <div className="lxr-mining-card">
           <div className="lxr-network-lines" />
@@ -507,7 +511,6 @@ const Dashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* Your stats unchanged */}
       <div style={styles.cardShell}>
         <Surface>
           <h3 style={styles.cardTitle}>Your Stats</h3>
@@ -539,7 +542,7 @@ const Dashboard: React.FC = () => {
       <div style={styles.container}>
         <div style={styles.topBar}>
           <div className="lxr-lexori-logo" style={styles.brand as any}>Web3 Community</div>
-        <div style={styles.userMenuWrap} ref={menuRef}>
+          <div style={styles.userMenuWrap} ref={menuRef}>
             <span style={styles.userIdText} title={displayUserId}>{displayUserId}</span>
             <button style={styles.userMenuBtn} onClick={() => setMenuOpen(v => !v)} aria-haspopup="menu" aria-expanded={menuOpen} aria-label="User menu">
               <IconUser size={18} />
