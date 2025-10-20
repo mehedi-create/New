@@ -14,26 +14,22 @@ import {
   isRegistered,
 } from '../utils/contract'
 import { showSuccessToast, showErrorToast } from '../utils/notification'
-import { markLogin, getStats, type StatsResponse, upsertUserFromChain, recordMiningPurchase } from '../services/api'
+import {
+  markLogin,
+  getStats,
+  type StatsResponse,
+  upsertUserFromChain,
+  recordMiningPurchase,
+  getMiningHistory,
+  type MiningHistoryItem,
+} from '../services/api'
 import { isValidAddress } from '../utils/wallet'
 import NoticeCarousel from '../components/NoticeCarousel'
-import { config } from '../config'
-import { ethers, JsonRpcProvider, Interface, zeroPadValue, formatUnits } from 'ethers'
 
 type OnChainData = {
   userBalance: string
   hasFundCode: boolean
   registrationFee: string
-}
-
-type MinerPurchaseItem = {
-  txHash: string
-  date: string
-  amount: string
-  active: boolean
-  daysLeft: number
-  startTime: number
-  endTime: number
 }
 
 const colors = {
@@ -131,6 +127,7 @@ const styles: Record<string, React.CSSProperties> = {
     padding: 12,
   },
 
+  // History modal table
   table: { width: '100%', borderCollapse: 'collapse' as const, color: colors.text },
   th: { textAlign: 'left' as const, padding: '8px 10px', borderBottom: `1px solid ${colors.grayLine}`, fontWeight: 900, fontSize: 13 },
   td: { padding: '8px 10px', borderBottom: `1px solid ${colors.grayLine}`, fontSize: 13 },
@@ -145,7 +142,6 @@ const IconSurpriseCoin: React.FC<{ size?: number }> = ({ size = 20 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24">
     <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="2"/>
     <circle cx="12" cy="12" r="4.5" fill="none" stroke="currentColor" strokeWidth="2"/>
-    <path d="M17.4 4.8l.5 1.4 1.4.5-1.4.5-.5 1.4-.5-1.4-1.4-.5 1.4-.5.5-1.4z" fill="currentColor"/>
   </svg>
 )
 const IconUser: React.FC<{ size?: number }> = ({ size = 18 }) => (
@@ -177,53 +173,6 @@ const getCookie = (name: string): string | null => {
   return null
 }
 
-// Fetch miner purchase history directly from chain (for modal)
-const fetchMinerHistoryFromChain = async (address: string): Promise<MinerPurchaseItem[]> => {
-  const provider = new JsonRpcProvider(config.readRpcUrl)
-  const ABI = ['event MinerPurchased(address indexed user, uint256 amount, uint256 startTime, uint256 endTime)']
-  const IFACE = new Interface(ABI)
-  const TOPIC = ethers.id('MinerPurchased(address,uint256,uint256,uint256)')
-  const user = ethers.getAddress(address)
-  const paddedUser = zeroPadValue(user, 32)
-
-  const latest = await provider.getBlockNumber()
-  const startConfigured = Number(config.startBlock || 0)
-  const maxBlocks = 200_000
-  const step = 50_000
-  const fromBlock = startConfigured > 0 ? startConfigured : Math.max(0, latest - maxBlocks)
-
-  const items: MinerPurchaseItem[] = []
-  for (let from = fromBlock; from <= latest; from += step + 1) {
-    const to = Math.min(from + step, latest)
-    try {
-      const logs = await provider.getLogs({ address: config.contractAddress, fromBlock: from, toBlock: to, topics: [TOPIC, paddedUser] })
-      for (const lg of logs) {
-        try {
-          const parsed = IFACE.parseLog(lg)
-          const amountRaw = BigInt(parsed?.args?.amount?.toString() || '0')
-          const startTime = Number(parsed?.args?.startTime || 0)
-          const endTime = Number(parsed?.args?.endTime || 0)
-          const now = Math.floor(Date.now() / 1000)
-          const active = now < endTime
-          const daysLeft = Math.max(0, Math.ceil((endTime * 1000 - Date.now()) / (24 * 3600 * 1000)))
-          items.push({
-            txHash: (lg as any).transactionHash || '',
-            date: new Date(startTime * 1000).toISOString().slice(0, 10),
-            amount: formatUnits(amountRaw, config.usdtDecimals),
-            active,
-            daysLeft,
-            startTime,
-            endTime,
-          })
-        } catch {}
-      }
-    } catch {}
-    await new Promise((r) => setTimeout(r, 80))
-  }
-  items.sort((a, b) => b.startTime - a.startTime)
-  return items
-}
-
 const Dashboard: React.FC = () => {
   const { account, userId, disconnect } = useWallet()
   const queryClient = useQueryClient()
@@ -241,7 +190,7 @@ const Dashboard: React.FC = () => {
     return () => { document.removeEventListener('mousedown', onDocClick); document.removeEventListener('keydown', onKey) }
   }, [])
 
-  // On-chain data
+  // ---------- On-chain data ----------
   const { data: onChainData, isLoading: isOnChainLoading } = useQuery<OnChainData | null>({
     queryKey: ['onChainData', account],
     enabled: isValidAddress(account),
@@ -249,12 +198,14 @@ const Dashboard: React.FC = () => {
     retry: 1,
     queryFn: async () => {
       if (!isValidAddress(account)) return null
-      const [balance, hasCode, fee] = await Promise.all([getUserBalance(account!), hasSetFundCode(account!), getRegistrationFee()])
+      const [balance, hasCode, fee] = await Promise.all([
+        getUserBalance(account!), hasSetFundCode(account!), getRegistrationFee(),
+      ])
       return { userBalance: balance, hasFundCode: hasCode, registrationFee: fee }
     },
   })
 
-  // Referrals
+  // ---------- Referrals ----------
   const { data: referralList = [], isLoading: isRefsLoading } = useQuery<string[]>({
     queryKey: ['referralsL1', account],
     enabled: isValidAddress(account),
@@ -265,7 +216,7 @@ const Dashboard: React.FC = () => {
     },
   })
 
-  // Mining stats
+  // ---------- Mining stats ----------
   useQuery<{ count: number; totalDeposited: string }>({
     queryKey: ['miningStats', account],
     enabled: isValidAddress(account),
@@ -276,7 +227,7 @@ const Dashboard: React.FC = () => {
     },
   })
 
-  // Off-chain stats
+  // ---------- Off-chain stats (lite) ----------
   const { data: stats, isLoading: _isStatsLoading, refetch: refetchStatsLite } = useQuery<StatsResponse | null>({
     queryKey: ['stats-lite', account],
     enabled: isValidAddress(account),
@@ -289,7 +240,7 @@ const Dashboard: React.FC = () => {
     },
   })
 
-  // Claim state
+  // ---------- Claim state (today) ----------
   const [claimedToday, setClaimedToday] = useState<boolean>(false)
   const [nextResetMs, setNextResetMs] = useState<number | null>(null)
   const [countdown, setCountdown] = useState<string>('')
@@ -309,7 +260,9 @@ const Dashboard: React.FC = () => {
       setClaimedToday(false)
       await refetchStatsLite()
     }, delay)
-    return () => { if (resetTimerRef.current) window.clearTimeout(resetTimerRef.current) }
+    return () => {
+      if (resetTimerRef.current) window.clearTimeout(resetTimerRef.current)
+    }
   }, [claimedToday, nextResetMs, refetchStatsLite])
 
   useEffect(() => {
@@ -328,7 +281,7 @@ const Dashboard: React.FC = () => {
     return () => { if (id) window.clearInterval(id) }
   }, [claimedToday, nextResetMs])
 
-  // Auto-sync off-chain profile
+  // ---------- Auto-sync: on-chain registered but off-chain missing ----------
   const ensureRef = useRef<{ inFlight: boolean; last: number }>({ inFlight: false, last: 0 })
   useEffect(() => {
     if (!isValidAddress(account)) return
@@ -352,7 +305,9 @@ const Dashboard: React.FC = () => {
           await upsertUserFromChain(account!, timestamp, signature)
           await refetchStatsLite()
         }
-      } catch {} finally {
+      } catch {
+        // silent
+      } finally {
         ensureRef.current.inFlight = false
         ensureRef.current.last = Date.now()
       }
@@ -368,7 +323,7 @@ const Dashboard: React.FC = () => {
   const copyToClipboard = (text: string) => { navigator.clipboard.writeText(text); showSuccessToast('Copied to clipboard') }
   const coinBalanceText = Number(stats?.coin_balance ?? 0).toFixed(2)
 
-  // Modals
+  // ---------- Modals (Payout) ----------
   const [showCoinInfo, setShowCoinInfo] = useState(false)
   const [showFundModal, setShowFundModal] = useState(false)
   const [fundCode, setFundCode] = useState('')
@@ -394,19 +349,20 @@ const Dashboard: React.FC = () => {
     }
   }
 
-  // Miner history modal
+  // ---------- Miner history modal (API-based) ----------
   const [showHistory, setShowHistory] = useState(false)
-  const { data: history = [], isLoading: isHistoryLoading, refetch: refetchHistory } = useQuery<MinerPurchaseItem[]>({
-    queryKey: ['minerHistory', account],
+  const { data: history = [], isLoading: isHistoryLoading, refetch: refetchHistory } = useQuery<MiningHistoryItem[]>({
+    queryKey: ['minerHistory', account, showHistory],
     enabled: showHistory && isValidAddress(account),
     refetchOnWindowFocus: false,
     queryFn: async () => {
       if (!isValidAddress(account)) return []
-      return fetchMinerHistoryFromChain(account!)
+      const res = await getMiningHistory(account!)
+      return res.data.items || []
     },
   })
 
-  // Actions
+  // ---------- Actions ----------
   const handleUserPayout = () => {
     if (!onChainData?.hasFundCode) { showErrorToast('Fund code not set. Please register with a fund code.'); return }
     openFundModal()
@@ -455,13 +411,16 @@ const Dashboard: React.FC = () => {
     try {
       const tx1 = await approveUSDT(miningAmount); if ((tx1 as any)?.wait) await (tx1 as any).wait()
       const tx2 = await buyMiner(miningAmount); if ((tx2 as any)?.wait) await (tx2 as any).wait()
+
+      // Record purchase in backend (for daily coin credits + history)
       try {
         if ((tx2 as any)?.hash) {
           await recordMiningPurchase(account!, (tx2 as any).hash)
         }
       } catch (e) {
-        showErrorToast(e, 'Purchase recorded on-chain, but off-chain credit setup failed. Please refresh.')
+        showErrorToast(e, 'On-chain ok, but off-chain record failed. Please refresh.')
       }
+
       showSuccessToast(`Purchased $${Number(miningAmount).toFixed(2)} mining power`)
       queryClient.invalidateQueries({ queryKey: ['miningStats', account] })
       refetchStatsLite()
@@ -476,7 +435,7 @@ const Dashboard: React.FC = () => {
   const canClaimToday = isValidAddress(account) && !isProcessing && !claimedToday
   const claimBtnLabel = claimedToday ? `Already signed${countdown ? ` • Resets in ${countdown}` : ''}` : 'Mark Today’s Login'
 
-  // Renderers
+  // ---------- Renderers ----------
   const renderHome = () => (
     <div style={styles.grid}>
       {/* Balance card */}
@@ -505,7 +464,7 @@ const Dashboard: React.FC = () => {
         </Surface>
       </div>
 
-      {/* Notice slider (safe: image + sandboxed script) */}
+      {/* Notice slider */}
       <div style={styles.cardShell}>
         <NoticeCarousel autoIntervalMs={5000} limit={10} />
       </div>
@@ -601,13 +560,7 @@ const Dashboard: React.FC = () => {
               <button className="lxr-buy-btn" onClick={confirmWithdraw} disabled={isProcessing}>
                 {isProcessing ? 'PROCESSING...' : 'Withdraw'}
               </button>
-              <button
-                style={{ ...styles.buttonGhost, ...(isProcessing ? styles.buttonGhostDisabled : {}) }}
-                onClick={() => setShowFundModal(false)}
-                disabled={isProcessing}
-              >
-                Cancel
-              </button>
+              <button style={{ ...styles.buttonGhost, ...(isProcessing ? styles.buttonGhostDisabled : {}) }} onClick={() => setShowFundModal(false)} disabled={isProcessing}>Cancel</button>
             </div>
           </div>
         </div>
@@ -615,11 +568,12 @@ const Dashboard: React.FC = () => {
     )
   }
 
+  // Miner history modal (uses backend API)
   const renderHistoryModal = () => {
     if (!showHistory) return null
     return (
       <div style={styles.overlay} onClick={() => setShowHistory(false)}>
-        <div className="lxr-surface" style={{ maxWidth: 700, width: '100%' }} onClick={(e) => e.stopPropagation()}>
+        <div className="lxr-surface" style={{ maxWidth: 760, width: '100%' }} onClick={(e) => e.stopPropagation()}>
           <div className="lxr-surface-lines" />
           <div className="lxr-surface-mesh" />
           <div className="lxr-surface-circuit" />
@@ -642,32 +596,36 @@ const Dashboard: React.FC = () => {
                     <th style={styles.th}>#</th>
                     <th style={styles.th}>Date</th>
                     <th style={styles.th}>Amount (USDT)</th>
+                    <th style={styles.th}>Daily Coins</th>
+                    <th style={styles.th}>Credited/Total</th>
                     <th style={styles.th}>Status</th>
                     <th style={styles.th}>Tx</th>
                   </tr>
                 </thead>
                 <tbody>
                   {isHistoryLoading ? (
-                    <tr><td colSpan={5} style={styles.td}>Loading...</td></tr>
+                    <tr><td colSpan={7} style={styles.td}>Loading...</td></tr>
                   ) : (history || []).length === 0 ? (
-                    <tr><td colSpan={5} style={{ ...styles.td, color: colors.textMuted }}>No purchases found</td></tr>
+                    <tr><td colSpan={7} style={{ ...styles.td, color: colors.textMuted }}>No purchases found</td></tr>
                   ) : (
                     (history || []).map((h, idx) => (
-                      <tr key={h.txHash || `${h.startTime}-${idx}`}>
+                      <tr key={h.tx_hash || `${h.start_date}-${idx}`}>
                         <td style={styles.td}>{idx + 1}</td>
-                        <td style={styles.td}>{h.date}</td>
-                        <td style={styles.td}>${Number(h.amount || '0').toFixed(2)}</td>
+                        <td style={styles.td}>{h.start_date}</td>
+                        <td style={styles.td}>${Number(h.amount_usd || 0).toFixed(2)}</td>
+                        <td style={styles.td}>{Number(h.daily_coins || 0).toFixed(2)}</td>
+                        <td style={styles.td}>{h.credited_days}/{h.total_days}</td>
                         <td style={styles.td}>
                           {h.active ? (
-                            <span style={styles.statusActive}>Active • {h.daysLeft}d left</span>
+                            <span style={styles.statusActive}>Active • {h.days_left}d left</span>
                           ) : (
-                            <span style={styles.statusExpired}>Expired</span>
+                            <span style={styles.statusExpired}>Expired • {h.end_date}</span>
                           )}
                         </td>
                         <td style={styles.td}>
-                          {h.txHash ? (
+                          {h.tx_hash ? (
                             <a
-                              href={`https://testnet.bscscan.com/tx/${h.txHash}`}
+                              href={`https://testnet.bscscan.com/tx/${h.tx_hash}`}
                               target="_blank"
                               rel="noopener noreferrer"
                               style={{ color: colors.accent, textDecoration: 'underline' }}
@@ -685,7 +643,7 @@ const Dashboard: React.FC = () => {
               </table>
             </div>
             <div style={{ marginTop: 8, fontSize: 12, color: colors.textMuted }}>
-              Note: Active = within 30 days from purchase. Amount is your invested USDT per purchase.
+              Note: Active = within 30 days from purchase. Daily Coins = coins/day; Amount(USDT) = your invested USD.
             </div>
           </div>
         </div>
@@ -703,14 +661,6 @@ const Dashboard: React.FC = () => {
               <IconInfo />
             </button>
           </div>
-          <div style={styles.balance}>{coinBalanceText}</div>
-          <button
-            style={{ ...styles.buttonGhost, ...styles.buttonGhostDisabled }}
-            disabled
-            title="Coming soon"
-          >
-            Withdraw (Coming Soon)
-          </button>
         </Surface>
       </div>
 
@@ -726,6 +676,7 @@ const Dashboard: React.FC = () => {
                 <div className="lxr-lexori-logo" style={{ fontSize: 22, fontWeight: 900, letterSpacing: 1 }}>LEXORI</div>
                 <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, color: colors.accent }}>MINING CARD</div>
               </div>
+              {/* Info button opens miner history modal */}
               <button
                 title="View Miner History"
                 aria-label="View Miner History"
