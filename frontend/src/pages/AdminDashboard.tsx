@@ -20,7 +20,7 @@ import {
   type AdminNotice,
 } from '../services/api'
 import { showSuccessToast, showErrorToast } from '../utils/notification'
-import { ethers, BrowserProvider } from 'ethers'
+import { BrowserProvider } from 'ethers'
 import UserToolsCard from '../components/admin/UserToolsCard'
 import AnalysisCard from '../components/common/AnalysisCard'
 
