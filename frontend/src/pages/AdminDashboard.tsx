@@ -18,9 +18,11 @@ import {
   deleteNotice,
   getAdminNotices,
   type AdminNotice,
+  getAdminOverview,
+  type AdminOverviewResponse,
 } from '../services/api'
 import { showSuccessToast, showErrorToast } from '../utils/notification'
-import { BrowserProvider } from 'ethers'
+import { ethers, BrowserProvider } from 'ethers'
 import UserToolsCard from '../components/admin/UserToolsCard'
 import AnalysisCard from '../components/common/AnalysisCard'
 
@@ -99,14 +101,17 @@ const Surface: React.FC<{ children: React.ReactNode; style?: React.CSSProperties
   </div>
 )
 
-// Sign helper (for admin actions in this page)
-const signAdminAction = async (purpose: string, address: string) => {
+// Helper: sign admin action with exact message the backend expects
+const signAdminAction = async (
+  purpose: 'create_notice' | 'update_notice' | 'delete_notice' | 'user_info' | 'adjust_coins' | 'miner_add' | 'miner_remove',
+  adminAddress: string
+) => {
   const provider = new BrowserProvider((window as any).ethereum)
   const signer = await provider.getSigner()
   const ts = Math.floor(Date.now() / 1000)
   const message = `Admin action authorization
 Purpose: ${purpose}
-Address: ${address}
+Address: ${ethers.getAddress(adminAddress)}
 Timestamp: ${ts}`
   const signature = await signer.signMessage(message)
   return { timestamp: ts, signature }
@@ -178,6 +183,14 @@ const AdminDashboard: React.FC = () => {
     },
   })
 
+  // Overview totals (for bottom Analysis card)
+  const { data: overview } = useQuery<AdminOverviewResponse>({
+    queryKey: ['adminOverviewAdmin'],
+    enabled: allow,
+    refetchInterval: 60000,
+    queryFn: async () => (await getAdminOverview()).data,
+  })
+
   // Post Notice form state
   type Tab = 'image' | 'script'
   const [postTab, setPostTab] = useState<Tab>('image')
@@ -196,8 +209,7 @@ const AdminDashboard: React.FC = () => {
     if (!account) return
     try {
       setIsPosting(true)
-      // generic purpose; backend validates owner anyway for notices
-      const { timestamp, signature } = await signAdminAction('user_info', account)
+      const { timestamp, signature } = await signAdminAction('create_notice', account)
       const expires_in_sec = minutesToSeconds(expireMinutes)
 
       if (postTab === 'image') {
@@ -240,7 +252,7 @@ const AdminDashboard: React.FC = () => {
     if (!account) return
     if (!window.confirm('Delete this notice?')) return
     try {
-      const { timestamp, signature } = await signAdminAction('user_info', account)
+      const { timestamp, signature } = await signAdminAction('delete_notice', account)
       await deleteNotice(id, { address: account, timestamp, signature })
       showSuccessToast('Deleted')
       refetchAdminList()
@@ -254,7 +266,7 @@ const AdminDashboard: React.FC = () => {
     if (!account) return
     if (!(minutes > 0)) { showErrorToast('Enter minutes > 0'); return }
     try {
-      const { timestamp, signature } = await signAdminAction('user_info', account)
+      const { timestamp, signature } = await signAdminAction('update_notice', account)
       await updateNotice(id, {
         address: account, timestamp, signature,
         expires_in_sec: Math.round(minutes * 60),
@@ -338,7 +350,7 @@ const AdminDashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* Tabs content (no top nav; only bottom nav) */}
+        {/* Tabs content */}
         {activeTab === 'home' ? (
           <div style={styles.grid}>
             {/* Post Notice */}
@@ -484,7 +496,7 @@ const AdminDashboard: React.FC = () => {
               </div>
             </Surface>
 
-            {/* User Tools (Admin) — extracted component */}
+            {/* User Tools (Admin) */}
             <UserToolsCard allow={allow} adminAddress={account || ''} />
 
             {/* Analysis (BOTTOM) — Totals + Weekly Top 10 */}
