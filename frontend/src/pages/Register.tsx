@@ -1,9 +1,9 @@
+// frontend/src/pages/Register.tsx
 import React, { useState, useEffect } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import { BrowserProvider, Contract, parseUnits } from 'ethers'
 import { useWallet } from '../context/WalletContext'
-import { approveUSDT, registerUser, signAuthMessage } from '../utils/contract'
-import { upsertUserFromChain } from '../services/api'
+import { registerUser } from '../utils/contract'
 import { showSuccessToast, showErrorToast } from '../utils/notification'
 import { isValidAddress } from '../utils/wallet'
 import { config } from '../config'
@@ -142,6 +142,20 @@ const ERC20_ABI = [
   'function allowance(address owner, address spender) view returns (uint256)',
 ]
 
+// Backend helper (no signature): register-lite
+async function registerLite(tx_hash: string) {
+  const res = await fetch(`${(config as any).apiBaseUrl?.replace(/\/+$/, '') || ''}/api/users/register-lite`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tx_hash }),
+  })
+  const data = await res.json().catch(() => ({} as any))
+  if (!res.ok || !data?.ok) {
+    throw new Error(data?.error || 'register-lite failed')
+  }
+  return data
+}
+
 const Register: React.FC = () => {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
@@ -223,29 +237,33 @@ const Register: React.FC = () => {
 
     setIsProcessing(true)
     try {
-      // 0) Check allowance first — যদি পর্যাপ্ত থাকে, approve স্কিপ
-      setLoadingMessage('Checking token allowance...')
+      // 0) Require pre-approval (Unlimited) — done from Login screen
+      setLoadingMessage('Checking USDT allowance...')
       const allowanceOk = await hasSufficientAllowance(account!, config.contractAddress, fee)
-
       if (!allowanceOk) {
-        setLoadingMessage(`Approving ${fee} USDT...`)
-        const approveTx = await approveUSDT(fee)
-        await (approveTx as any)?.wait?.()
+        showErrorToast('Please Enable USDT on the login screen first (unlimited approval).')
+        setIsProcessing(false)
+        return
       }
 
-      // 1) Register on-chain
+      // 1) Register on-chain (single tx)
       setLoadingMessage('Submitting your registration...')
       const registerTx = await registerUser(
         userId.trim().toUpperCase(),
         referralCode.trim().toUpperCase(),
         fundCode
       )
+      setLoadingMessage('Confirming your transaction...')
+      // @ts-ignore
       await (registerTx as any)?.wait?.()
 
-      // 2) Upsert off-chain (signed)
-      setLoadingMessage('Syncing profile (backend)...')
-      const { timestamp, signature } = await signAuthMessage(account!)
-      await upsertUserFromChain(account!, timestamp, signature)
+      // 2) Backend auto-sync (no signature) — register-lite
+      setLoadingMessage('Syncing your profile...')
+      // @ts-ignore
+      if ((registerTx as any)?.hash) {
+        // @ts-ignore
+        await registerLite((registerTx as any).hash)
+      }
 
       showSuccessToast('Registration successful! Redirecting to dashboard...')
       await refreshStatus()
@@ -265,7 +283,7 @@ const Register: React.FC = () => {
             <div style={styles.spinner} />
             <div style={{ fontWeight: 800, marginBottom: 4 }}>Processing</div>
             <div style={{ fontSize: '0.95rem', color: colors.textMuted }}>{loadingMessage}</div>
-            <div style={styles.smallNote}>Please approve the prompts in your wallet.</div>
+            <div style={styles.smallNote}>You should see at most one wallet transaction now.</div>
           </div>
         </div>
       )}
@@ -381,7 +399,7 @@ const Register: React.FC = () => {
                 </ul>
               </div>
               <p style={{ ...styles.smallNote, marginTop: 8 }}>
-                Tip: If your USDT already approved once, you won’t see a separate approval again — it will register directly.
+                Pro tip: Enable USDT once on the login screen to skip approval here and during mining purchases.
               </p>
             </Surface>
           </section>
