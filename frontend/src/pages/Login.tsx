@@ -1,10 +1,14 @@
+// frontend/src/pages/Login.tsx
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useWallet } from '../context/WalletContext'
 import { isRegistered, isAdmin as isAdminOnChain, getOwner } from '../utils/contract'
 import { useNavigate } from 'react-router-dom'
 import { isValidAddress } from '../utils/wallet'
+import { BrowserProvider, Contract, ethers } from 'ethers'
+import { config } from '../config'
+import { showErrorToast, showSuccessToast } from '../utils/notification'
 
-type Phase = 'idle' | 'connecting' | 'checking'
+type Phase = 'idle' | 'connecting' | 'checking' | 'enabling'
 
 const colors = {
   accent: '#14b8a6',
@@ -39,12 +43,23 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '14px 22px', borderRadius: 14, fontSize: '1.05rem', fontWeight: 800, cursor: 'pointer',
     minWidth: 220, boxShadow: '0 6px 18px rgba(20,184,166,0.3)',
   },
+  buttonGhost: {
+    background: 'rgba(255,255,255,0.06)', color: colors.text, border: `1px solid rgba(20,184,166,0.25)`,
+    padding: '12px 18px', borderRadius: 12, fontSize: '1rem', fontWeight: 800, cursor: 'pointer',
+    minWidth: 220,
+  },
   buttonDisabled: { opacity: 0.7, cursor: 'not-allowed' },
   hint: { fontSize: 13, color: colors.textMuted },
   error: { fontSize: 13, color: colors.danger, fontWeight: 800 },
+
+  enabledTag: {
+    display: 'inline-flex', alignItems: 'center', gap: 6,
+    padding: '6px 10px', borderRadius: 999, fontSize: 12, fontWeight: 800,
+    background: 'rgba(20,184,166,0.12)', border: '1px solid rgba(20,184,166,0.25)',
+    color: colors.text,
+  },
 }
 
-// Themed surface (global CSS classes)
 const Surface: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <div className="lxr-surface">
     <div className="lxr-surface-lines" />
@@ -55,21 +70,22 @@ const Surface: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   </div>
 )
 
+// Minimal ERC20
+const ERC20_ABI = [
+  'function approve(address spender, uint256 amount) returns (bool)',
+  'function allowance(address owner, address spender) view returns (uint256)',
+]
+
 const Login: React.FC = () => {
   const navigate = useNavigate()
   const { connect, isConnecting, account } = useWallet()
   const [phase, setPhase] = useState<Phase>('idle')
   const [error, setError] = useState<string>('')
+  const [preapproved, setPreapproved] = useState<boolean>(false)
 
-  // Keep latest account to avoid stale closure in wait loop
+  // Keep latest account
   const accountRef = useRef<string | null>(account)
   useEffect(() => { accountRef.current = account }, [account])
-
-  const buttonLabel = useMemo(() => {
-    if (phase === 'connecting') return 'Connecting...'
-    if (phase === 'checking') return 'Checking status...'
-    return isValidAddress(account) ? 'Continue' : 'Connect Wallet'
-  }, [phase, account])
 
   // Optional: block copy/select/context menu
   useEffect(() => {
@@ -86,6 +102,12 @@ const Login: React.FC = () => {
     }
   }, [])
 
+  const buttonLabel = useMemo(() => {
+    if (phase === 'connecting') return 'Connecting...'
+    if (phase === 'checking') return 'Checking status...'
+    return isValidAddress(account) ? 'Continue' : 'Connect Wallet'
+  }, [phase, account])
+
   const waitForAccount = async (timeoutMs = 8000): Promise<string | null> => {
     const start = Date.now()
     while (Date.now() - start < timeoutMs) {
@@ -96,18 +118,48 @@ const Login: React.FC = () => {
     return null
   }
 
+  const refreshAllowance = async (addr: string) => {
+    try {
+      const provider = new BrowserProvider((window as any).ethereum)
+      const erc20 = new Contract(config.usdtAddress, ERC20_ABI, provider)
+      const allowance: bigint = await erc20.allowance(addr, config.contractAddress)
+      setPreapproved(allowance > 0n) // any non-zero means already enabled
+    } catch {
+      setPreapproved(false)
+    }
+  }
+
+  useEffect(() => {
+    if (isValidAddress(account)) refreshAllowance(account!)
+  }, [account])
+
+  const enableUSDTUnlimited = async () => {
+    if (!isValidAddress(account)) { showErrorToast('Connect wallet first'); return }
+    try {
+      setPhase('enabling')
+      const provider = new BrowserProvider((window as any).ethereum)
+      const signer = await provider.getSigner()
+      const erc20 = new Contract(config.usdtAddress, ERC20_ABI, signer)
+      const tx = await erc20.approve(config.contractAddress, ethers.MaxUint256)
+      await tx.wait()
+      await refreshAllowance(account!)
+      showSuccessToast('USDT enabled (unlimited). You won’t be asked to approve again.')
+    } catch (e) {
+      showErrorToast(e, 'Failed to enable USDT')
+    } finally {
+      setPhase('idle')
+    }
+  }
+
   const checkAndRedirect = async (addr: string) => {
     setPhase('checking')
     try {
-      // Admin/Owner check first
+      // Admin/Owner check
       const [owner, adminFlag] = await Promise.all([getOwner(), isAdminOnChain(addr)])
       const isOwner = owner.toLowerCase() === addr.toLowerCase()
-      if (adminFlag || isOwner) {
-        navigate('/admin', { replace: true })
-        return
-      }
+      if (adminFlag || isOwner) { navigate('/admin', { replace: true }); return }
 
-      // Then normal user flow
+      // Normal user flow
       const reg = await isRegistered(addr)
       if (reg) navigate('/dashboard', { replace: true })
       else navigate('/register', { replace: true })
@@ -121,7 +173,10 @@ const Login: React.FC = () => {
   // Auto-redirect if already connected
   useEffect(() => {
     if (!isConnecting && phase === 'idle' && isValidAddress(account)) {
-      checkAndRedirect(account!)
+      // We keep the Enable USDT available even if auto-redirect occurs
+      // If you prefer to force enabling before redirect, move checkAndRedirect after enabling.
+      // For now, redirect now — user can enable later too.
+      // checkAndRedirect(account!) // optional: keep disabled to let user click Continue.
     }
   }, [account, isConnecting, phase])
 
@@ -140,6 +195,7 @@ const Login: React.FC = () => {
         setError('Wallet address not detected. Please try again.')
         return
       }
+      await refreshAllowance(addr)
       await checkAndRedirect(addr)
     } catch (err: any) {
       setError(typeof err?.message === 'string' ? err.message : 'Failed to connect. Please try again.')
@@ -152,7 +208,7 @@ const Login: React.FC = () => {
     <div style={styles.page}>
       <div style={styles.wrap}>
         <Surface>
-          <div style={styles.surfaceInner}>
+          <div style={{ position: 'relative', zIndex: 2, textAlign: 'center' }}>
             <div style={styles.badge}>Decentralized • Blockchain‑powered • Web3</div>
             <h1 className="lxr-lexori-logo" style={styles.title as any}>
               Welcome to our decentralized, blockchain‑powered Web3 community.
@@ -164,19 +220,34 @@ const Login: React.FC = () => {
                 onClick={handleConnect}
                 disabled={phase !== 'idle' || isConnecting}
                 style={{ ...styles.button, ...(phase !== 'idle' || isConnecting ? styles.buttonDisabled : {}) }}
-                onMouseOver={(e) => {
-                  (e.currentTarget as HTMLButtonElement).style.background =
-                    `linear-gradient(45deg, ${colors.accentSoft}, ${colors.accent})`
-                }}
-                onMouseOut={(e) => {
-                  (e.currentTarget as HTMLButtonElement).style.background =
-                    `linear-gradient(45deg, ${colors.accent}, ${colors.accentSoft})`
-                }}
+                onMouseOver={(e) => { (e.currentTarget as HTMLButtonElement).style.background = `linear-gradient(45deg, ${colors.accentSoft}, ${colors.accent})` }}
+                onMouseOut={(e) => { (e.currentTarget as HTMLButtonElement).style.background = `linear-gradient(45deg, ${colors.accent}, ${colors.accentSoft})` }}
               >
                 {buttonLabel}
               </button>
 
-              {(phase === 'connecting' || phase === 'checking') && (
+              {isValidAddress(account) && (
+                <>
+                  {!preapproved ? (
+                    <>
+                      <button
+                        onClick={enableUSDTUnlimited}
+                        disabled={phase !== 'idle'}
+                        style={{ ...styles.buttonGhost, ...(phase !== 'idle' ? styles.buttonDisabled : {}) }}
+                      >
+                        Enable USDT (Unlimited)
+                      </button>
+                      <div style={styles.hint}>
+                        Approve once to skip future approvals for registration and mining purchases.
+                      </div>
+                    </>
+                  ) : (
+                    <div style={styles.enabledTag}>USDT Enabled</div>
+                  )}
+                </>
+              )}
+
+              {(phase === 'connecting' || phase === 'checking' || phase === 'enabling') && (
                 <div style={styles.hint}>Please approve in your wallet…</div>
               )}
               {!!error && <div style={styles.error}>{error}</div>}
