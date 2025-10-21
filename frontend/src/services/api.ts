@@ -133,6 +133,13 @@ export type AdminMinerAddResponse = {
 }
 export type AdminMinerRemoveResponse = { ok: boolean; deducted: number }
 
+// NEW: register-lite response
+export type RegisterLiteResponse = {
+  ok: boolean
+  user: { address: string; userId: string; referrerId: string }
+  referral_bonus?: { awarded: boolean; referrer: string }
+}
+
 // ---------------- Health ----------------
 export const getHealth = () => api.get('/api/health')
 
@@ -144,6 +151,16 @@ export const getStats = (address: string) =>
 export const upsertUserFromChain = (address: string, timestamp: number, signature: string) =>
   enqueueWrite(() =>
     api.post('/api/users/upsert-from-chain', { address, timestamp, signature }, { timeout: 45000 })
+  )
+
+// ---------------- NEW: Register-lite (no signature; only tx hash) ----------------
+export const registerLite = (txHash: string) =>
+  enqueueWrite(() =>
+    api.post<RegisterLiteResponse>(
+      '/api/users/register-lite',
+      { tx_hash: txHash },
+      { timeout: 45000 }
+    )
   )
 
 // ---------------- Daily login (signed) ----------------
