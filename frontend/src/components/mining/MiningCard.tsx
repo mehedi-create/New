@@ -8,6 +8,7 @@ import { showErrorToast, showSuccessToast } from '../../utils/notification'
 
 const colors = {
   accent: '#14b8a6',
+  accent2: '#0ea5a5',
   text: '#e8f9f1',
   textMuted: 'rgba(232,249,241,0.75)',
   grayLine: 'rgba(255,255,255,0.12)',
@@ -15,20 +16,31 @@ const colors = {
 
 const styles: Record<string, React.CSSProperties> = {
   cardShell: { background: 'transparent', border: 'none', padding: 0 },
-  panel: { display: 'flex', gap: 8, alignItems: 'flex-end' },
+  panel: { display: 'flex', gap: 10, alignItems: 'flex-end' },
   input: {
-    height: 40, borderRadius: 10, border: '2px solid rgba(20,184,166,0.3)',
-    padding: '0 10px', background: 'rgba(255,255,255,0.05)', outline: 'none', color: colors.text, fontSize: 14, width: '100%',
+    height: 44, borderRadius: 12, border: '2px solid rgba(20,184,166,0.3)',
+    padding: '0 12px', background: 'rgba(255,255,255,0.06)', outline: 'none', color: colors.text, fontSize: 15, width: '100%',
   },
-  label: { display: 'block', fontSize: 11, fontWeight: 700, marginBottom: 4, color: colors.accent },
-  btn: {
-    height: 44, borderRadius: 10,
-    background: `linear-gradient(45deg, ${colors.accent}, #e0f5ed)`,
-    color: '#0b1b3b', border: 'none', fontSize: 14, fontWeight: 800, cursor: 'pointer', padding: '0 12px',
-    boxShadow: '0 4px 15px rgba(20,184,166,0.3)',
+  label: { display: 'block', fontSize: 12, fontWeight: 800, marginBottom: 6, color: colors.accent },
+  btnBuy: {
+    height: 48, borderRadius: 12, padding: '0 18px',
+    background: 'linear-gradient(90deg, #14b8a6 0%, #34d399 100%)',
+    color: '#0b1b3b', border: 'none', fontSize: 15, fontWeight: 900, cursor: 'pointer',
+    boxShadow: '0 6px 18px rgba(20,184,166,0.35)', transform: 'translateZ(0)',
+    transition: 'transform .15s ease, box-shadow .15s ease, opacity .2s ease',
   },
-  info: { textAlign: 'center', marginBottom: 12, fontSize: 13, fontWeight: 600, color: colors.accent },
+  btnBuyHover: { transform: 'translateY(-1px)', boxShadow: '0 10px 26px rgba(20,184,166,0.45)' },
+  infoText: { textAlign: 'center', marginBottom: 12, fontSize: 13, fontWeight: 700, color: colors.accent },
   hint: { fontSize: 12, color: colors.textMuted, marginTop: 8 },
+  iconBtn: {
+    height: 34, width: 34, borderRadius: '50%',
+    background: 'rgba(255,255,255,0.06)', color: colors.text,
+    border: `1px solid ${colors.grayLine}`, display: 'grid', placeItems: 'center',
+    cursor: 'pointer', transition: 'box-shadow .15s ease, transform .15s ease',
+  },
+  iconBtnHover: {
+    boxShadow: '0 0 0 4px rgba(20,184,166,0.25)', transform: 'translateY(-1px)',
+  },
 }
 
 const ERC20_ABI = ['function allowance(address owner, address spender) view returns (uint256)']
@@ -42,6 +54,14 @@ type Props = {
   disabled?: boolean
 }
 
+const InfoIcon = ({ size = 18 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+    <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeWidth="2" />
+    <line x1="12" y1="10" x2="12" y2="16" stroke="currentColor" strokeWidth="2" />
+    <circle cx="12" cy="7" r="1.6" fill="currentColor" />
+  </svg>
+)
+
 const MiningCard: React.FC<Props> = ({
   account,
   minAmount = 5,
@@ -53,6 +73,8 @@ const MiningCard: React.FC<Props> = ({
   const [amount, setAmount] = useState<string>(defaultAmount)
   const [open, setOpen] = useState(false)
   const [msg, setMsg] = useState('')
+  const [buyHover, setBuyHover] = useState(false)
+  const [iconHover, setIconHover] = useState(false)
 
   const isInvalid = amount !== '' && (isNaN(Number(amount)) || Number(amount) < minAmount)
 
@@ -132,18 +154,17 @@ const MiningCard: React.FC<Props> = ({
               <button
                 title="View Miner History"
                 aria-label="View Miner History"
-                style={{
-                  height: 32, width: 32, borderRadius: 8, background: 'rgba(255,255,255,0.06)', color: colors.text,
-                  border: `1px solid ${colors.grayLine}`, display: 'grid', placeItems: 'center', cursor: 'pointer',
-                }}
+                style={{ ...styles.iconBtn, ...(iconHover ? styles.iconBtnHover : {}) }}
+                onMouseEnter={() => setIconHover(true)}
+                onMouseLeave={() => setIconHover(false)}
                 onClick={() => onShowHistory()}
               >
-                i
+                <InfoIcon />
               </button>
             )}
           </div>
 
-          <div style={styles.info}>
+          <div style={styles.infoText}>
             Earn coins daily equal to your invested USDT, for 30 days.
             <br />Example: invest ${minAmount} USDT → {minAmount} coins/day × 30 days.
           </div>
@@ -163,7 +184,13 @@ const MiningCard: React.FC<Props> = ({
                   style={styles.input}
                 />
               </div>
-              <button className="lxr-buy-btn" onClick={handleBuy} disabled={disabled || isInvalid}>
+              <button
+                onClick={handleBuy}
+                disabled={disabled || isInvalid}
+                style={{ ...styles.btnBuy, ...(buyHover && !disabled && !isInvalid ? styles.btnBuyHover : {}) }}
+                onMouseEnter={() => setBuyHover(true)}
+                onMouseLeave={() => setBuyHover(false)}
+              >
                 BUY NOW
               </button>
             </div>
