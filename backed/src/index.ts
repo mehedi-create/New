@@ -123,11 +123,32 @@ const PLATFORM_ABI = [
   'function owner() view returns (address)',
   'function usdtToken() view returns (address)',
   'event MinerPurchased(address indexed user, uint256 amount, uint256 startTime, uint256 endTime)',
+  // Include a common variant of UserRegistered; parsing is handled flexibly below
+  'event UserRegistered(address indexed user, string userId, address indexed referrer)',
 ]
 const ERC20_ABI = ['function decimals() view returns (uint8)']
 
 const MINER_PURCHASED_TOPIC = ethers.id('MinerPurchased(address,uint256,uint256,uint256)')
 const IFACE = new Interface(PLATFORM_ABI)
+
+// Fallback interfaces to parse UserRegistered with different userId types/names
+const REG_IFACES = [
+  new Interface(['event UserRegistered(address indexed user, string userId, address indexed referrer)']),
+  new Interface(['event UserRegistered(address user, string userId, address referrer)']),
+  new Interface(['event UserRegistered(address indexed user, bytes32 userId, address indexed referrer)']),
+  new Interface(['event Registered(address indexed user, string userId, address indexed referrer)']),
+  new Interface(['event Registered(address indexed user, bytes32 userId, address indexed referrer)']),
+]
+const REG_TOPICS = [
+  ethers.id('UserRegistered(address,string,address)'),
+  ethers.id('UserRegistered(address,bytes32,address)'),
+  ethers.id('UserRegistered(address,string)'),
+  ethers.id('UserRegistered(address,bytes32)'),
+  ethers.id('Registered(address,string,address)'),
+  ethers.id('Registered(address,bytes32,address)'),
+  ethers.id('Registered(address,string)'),
+  ethers.id('Registered(address,bytes32)'),
+]
 
 function getProvider(env: Bindings): JsonRpcProvider {
   const url = (env.BSC_RPC_URL || '').replace(/\/+$/, '')
@@ -311,7 +332,7 @@ app.get('/api/debug/rpc', async (c) => {
 // Health
 app.get('/api/health', (c) => c.json({ ok: true, time: Date.now() }))
 
-// Upsert user (signed) — referral bonus
+// Upsert user (signed) — referral bonus (kept for backward compat; register-lite is preferred)
 app.post('/api/users/upsert-from-chain', async (c) => {
   const cleanup = (key: string) => { inflightUpsert.delete(key); lastUpsertAt.set(key, Date.now()) }
   try {
@@ -362,7 +383,83 @@ app.post('/api/users/upsert-from-chain', async (c) => {
   }
 })
 
-// Daily login
+// NEW: Register-lite (no signature; only tx_hash) — parse UserRegistered event and sync DB
+app.post('/api/users/register-lite', async (c) => {
+  try {
+    const body = await c.req.json<{ tx_hash: string }>()
+    const { tx_hash } = body || ({} as any)
+    if (!tx_hash || typeof tx_hash !== 'string') return c.json({ error: 'Missing tx_hash' }, 400)
+
+    const provider = getProvider(c.env)
+    const receipt = await provider.getTransactionReceipt(tx_hash)
+    if (!receipt || receipt.status !== 1) return c.json({ error: 'Tx not found or failed' }, 400)
+
+    const contractAddr = ethers.getAddress(c.env.CONTRACT_ADDRESS)
+    const logs = (receipt.logs || []).filter((lg: any) => lg.address && ethers.getAddress(lg.address) === contractAddr)
+
+    let userAddr: string | null = null
+    // Try topic pre-filter
+    for (const lg of logs) {
+      if (!lg.topics || !lg.topics.length) continue
+      if (!REG_TOPICS.includes(lg.topics[0])) continue
+      // Try all register interfaces
+      for (const I of REG_IFACES) {
+        try {
+          const parsed = I.parseLog({ topics: lg.topics, data: lg.data })
+          const u = parsed?.args?.user as string
+          if (u && ethers.isAddress(u)) { userAddr = ethers.getAddress(u); break }
+        } catch {}
+      }
+      if (userAddr) break
+    }
+    // Fallback: try parse with all I on all logs from contract (even if topic didn't match list)
+    if (!userAddr) {
+      for (const lg of logs) {
+        for (const I of REG_IFACES) {
+          try {
+            const parsed = I.parseLog({ topics: lg.topics, data: lg.data })
+            const u = parsed?.args?.user as string
+            if (u && ethers.isAddress(u)) { userAddr = ethers.getAddress(u); break }
+          } catch {}
+        }
+        if (userAddr) break
+      }
+    }
+
+    if (!userAddr) return c.json({ error: 'UserRegistered event not found in tx' }, 400)
+
+    const lower = userAddr.toLowerCase()
+    const existed = await c.env.DB.prepare('SELECT 1 FROM users WHERE wallet_address = ?').bind(lower).first()
+
+    // Always read on-chain profile to get canonical userId/referrerId
+    const profile = await getChainProfile(c.env, userAddr)
+    if (!profile) return c.json({ error: 'Address not registered on-chain' }, 400)
+
+    await upsertDbUser(c.env.DB, { walletAddress: userAddr, userId: profile.userId, referrerId: profile.referrerId || '' })
+
+    // Referral bonus if first time
+    let referralBonus = { awarded: false, referrer: '' as string }
+    if (!existed && profile.referrerAddr && profile.referrerAddr !== ethers.ZeroAddress) {
+      const refLower = profile.referrerAddr.toLowerCase()
+      await ensureUserInDb(c.env, profile.referrerAddr)
+      const already = await c.env.DB.prepare('SELECT 1 FROM referral_rewards WHERE referred_wallet = ?').bind(lower).first()
+      if (!already) {
+        await c.env.DB.batch([
+          c.env.DB.prepare('UPDATE users SET coin_balance = coin_balance + 5 WHERE wallet_address = ?').bind(refLower),
+          c.env.DB.prepare('INSERT INTO referral_rewards (referred_wallet, referrer_id, reward_coins) VALUES (?, ?, 5)').bind(lower, (profile.referrerId || '').toUpperCase()),
+        ])
+        referralBonus = { awarded: true, referrer: refLower }
+      }
+    }
+
+    return c.json({ ok: true, user: { address: lower, userId: profile.userId, referrerId: profile.referrerId || '' }, referral_bonus: referralBonus })
+  } catch (e: any) {
+    console.error('POST /api/users/register-lite error:', e?.stack || e?.message || e)
+    return c.json({ error: 'Server error' }, 500)
+  }
+})
+
+// Daily login (signed)
 app.post('/api/users/:address/login', async (c) => {
   try {
     const { address } = c.req.param()
