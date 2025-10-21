@@ -19,12 +19,17 @@ import {
   getStats,
   type StatsResponse,
   upsertUserFromChain,
-  recordMiningPurchase,
+  // OLD: recordMiningPurchase,
   getMiningHistory,
   type MiningHistoryItem,
+  recordMiningPurchaseLite,
 } from '../services/api'
 import { isValidAddress } from '../utils/wallet'
 import NoticeCarousel from '../components/NoticeCarousel'
+
+// NEW: one-click allowance helpers
+import { BrowserProvider, Contract, parseUnits } from 'ethers'
+import { config } from '../config'
 
 type OnChainData = {
   userBalance: string
@@ -172,6 +177,11 @@ const getCookie = (name: string): string | null => {
   return null
 }
 
+// Minimal ERC20 ABI for allowance check
+const ERC20_ABI = [
+  'function allowance(address owner, address spender) view returns (uint256)',
+]
+
 const Dashboard: React.FC = () => {
   const { account, userId, disconnect } = useWallet()
   const queryClient = useQueryClient()
@@ -186,7 +196,9 @@ const Dashboard: React.FC = () => {
     const onDocClick = (e: MouseEvent) => { if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false) }
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenuOpen(false) }
     document.addEventListener('mousedown', onDocClick); document.addEventListener('keydown', onKey)
-    return () => { document.removeEventListener('mousedown', onDocClick); document.removeEventListener('keydown', onKey) }
+    return () => {
+      document.removeEventListener('mousedown', onDocClick); document.removeEventListener('keydown', onKey)
+    }
   }, [])
 
   // ---------- On-chain data ----------
@@ -361,6 +373,19 @@ const Dashboard: React.FC = () => {
     },
   })
 
+  // ---------- Helpers: allowance check for one-click miner buy ----------
+  const hasSufficientAllowance = async (owner: string, spender: string, amountStr: string) => {
+    try {
+      const provider = new BrowserProvider((window as any).ethereum)
+      const usdt = new Contract(config.usdtAddress, ERC20_ABI, provider)
+      const allowance: bigint = await (usdt as any).allowance(owner, spender)
+      const need = parseUnits(String(amountStr || '0'), config.usdtDecimals)
+      return allowance >= need
+    } catch {
+      return false
+    }
+  }
+
   // ---------- Actions ----------
   const handleUserPayout = () => {
     if (!onChainData?.hasFundCode) { showErrorToast('Fund code not set. Please register with a fund code.'); return }
@@ -408,15 +433,24 @@ const Dashboard: React.FC = () => {
     if (isNaN(amountNum) || amountNum < 5) { showErrorToast('Minimum 5 USDT required.'); return }
     setIsProcessing(true)
     try {
-      const tx1 = await approveUSDT(miningAmount); if ((tx1 as any)?.wait) await (tx1 as any).wait()
-      const tx2 = await buyMiner(miningAmount); if ((tx2 as any)?.wait) await (tx2 as any).wait()
+      // 0) Allowance check → approve only if needed
+      const allowanceOk = await hasSufficientAllowance(account!, config.contractAddress, miningAmount)
+      if (!allowanceOk) {
+        const tx1 = await approveUSDT(miningAmount)
+        if ((tx1 as any)?.wait) await (tx1 as any).wait()
+      }
 
+      // 1) Buy miner
+      const tx2 = await buyMiner(miningAmount)
+      if ((tx2 as any)?.wait) await (tx2 as any).wait()
+
+      // 2) Off-chain record (lite)
       try {
         if ((tx2 as any)?.hash) {
-          await recordMiningPurchase(account!, (tx2 as any).hash)
+          await recordMiningPurchaseLite((tx2 as any).hash)
         }
       } catch (e) {
-        showErrorToast(e, 'On-chain ok, but off-chain record failed. Please refresh.')
+        showErrorToast(e, 'On-chain OK, but off-chain record failed. Please refresh.')
       }
 
       showSuccessToast(`Purchased $${Number(miningAmount).toFixed(2)} mining power`)
