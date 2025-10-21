@@ -8,7 +8,6 @@ const colors = {
 
 const styles: Record<string, React.CSSProperties> = {
   wrapFixed: { position: 'fixed', bottom: 12, left: '50%', transform: 'translateX(-50%)', width: '100%', padding: '0 12px', zIndex: 200 },
-  innerMax: (maxWidth: number): React.CSSProperties => ({ maxWidth, margin: '0 auto' }),
   surfacePad: { padding: 8, borderRadius: 14 },
   row: { display: 'grid', gap: 8 },
   btn: {
@@ -29,6 +28,12 @@ const styles: Record<string, React.CSSProperties> = {
   },
   label: { fontSize: 11, fontWeight: 800, marginTop: 2 },
 }
+
+// helper function (type-safe)
+const innerMax = (maxWidth: number): React.CSSProperties => ({
+  maxWidth,
+  margin: '0 auto',
+})
 
 export type BottomNavItem = {
   key: string
@@ -52,7 +57,7 @@ const BottomNav: React.FC<Props> = ({ items, columns, fixed = true, maxWidth = 8
   const cols = columns || Math.max(1, items.length)
   return (
     <div style={fixed ? styles.wrapFixed : undefined} className={className}>
-      <div className="lxr-surface" style={{ ...styles.surfacePad, ...(fixed ? styles.innerMax(maxWidth) : {}) }}>
+      <div className="lxr-surface" style={{ ...styles.surfacePad, ...(fixed ? innerMax(maxWidth) : {}) }}>
         <div className="lxr-surface-lines" />
         <div className="lxr-surface-mesh" />
         <div className="lxr-surface-circuit" />
