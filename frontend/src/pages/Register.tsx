@@ -1,9 +1,9 @@
-// frontend/src/pages/Register.tsx
 import React, { useState, useEffect } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
-import { BrowserProvider, Contract, parseUnits } from 'ethers'
+import { parseUnits } from 'ethers'
 import { useWallet } from '../context/WalletContext'
-import { registerUser } from '../utils/contract'
+import { registerUser, getUSDTAllowance } from '../utils/contract'
+import { registerLite } from '../services/api'
 import { showSuccessToast, showErrorToast } from '../utils/notification'
 import { isValidAddress } from '../utils/wallet'
 import { config } from '../config'
@@ -137,23 +137,15 @@ const Surface: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   </div>
 )
 
-// Minimal ERC20 ABI for allowance check
-const ERC20_ABI = [
-  'function allowance(address owner, address spender) view returns (uint256)',
-]
-
-// Backend helper (no signature): register-lite
-async function registerLite(tx_hash: string) {
-  const res = await fetch(`${(config as any).apiBaseUrl?.replace(/\/+$/, '') || ''}/api/users/register-lite`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ tx_hash }),
-  })
-  const data = await res.json().catch(() => ({} as any))
-  if (!res.ok || !data?.ok) {
-    throw new Error(data?.error || 'register-lite failed')
+// Helper: check allowance >= fee
+const hasSufficientAllowance = async (owner: string, spender: string, feeStr: string) => {
+  try {
+    const allowance: bigint = await getUSDTAllowance(owner, spender)
+    const need = parseUnits(feeStr, config.usdtDecimals)
+    return allowance >= need
+  } catch {
+    return false
   }
-  return data
 }
 
 const Register: React.FC = () => {
@@ -211,20 +203,6 @@ const Register: React.FC = () => {
     setIsFormValid(valid)
   }, [userId, referralCode, fundCode, confirmFundCode])
 
-  // Helper: check allowance; returns true if allowance >= fee
-  const hasSufficientAllowance = async (owner: string, spender: string, feeStr: string) => {
-    try {
-      const provider = new BrowserProvider((window as any).ethereum)
-      const usdt = new Contract(config.usdtAddress, ERC20_ABI, provider)
-      const allowance: bigint = await (usdt as any).allowance(owner, spender)
-      const need = parseUnits(feeStr, config.usdtDecimals)
-      return allowance >= need
-    } catch {
-      // If cannot read allowance, fallback to approve path
-      return false
-    }
-  }
-
   const handleRegister = async () => {
     if (!isValidAddress(account)) {
       showErrorToast('Please connect your wallet first.')
@@ -237,35 +215,35 @@ const Register: React.FC = () => {
 
     setIsProcessing(true)
     try {
-      // 0) Require pre-approval (Unlimited) — done from Login screen
-      setLoadingMessage('Checking USDT allowance...')
+      // 0) Require pre-approval (Unlimited) — done on Login screen
+      setLoadingMessage('Checking USDT allowance…')
       const allowanceOk = await hasSufficientAllowance(account!, config.contractAddress, fee)
       if (!allowanceOk) {
-        showErrorToast('Please Enable USDT on the login screen first (unlimited approval).')
+        showErrorToast('Please Enable USDT (Unlimited) on the login screen first.')
         setIsProcessing(false)
         return
       }
 
       // 1) Register on-chain (single tx)
-      setLoadingMessage('Submitting your registration...')
+      setLoadingMessage('Submitting your registration…')
       const registerTx = await registerUser(
         userId.trim().toUpperCase(),
         referralCode.trim().toUpperCase(),
         fundCode
       )
-      setLoadingMessage('Confirming your transaction...')
+      setLoadingMessage('Confirming your transaction…')
       // @ts-ignore
-      await (registerTx as any)?.wait?.()
+      await registerTx?.wait?.()
 
       // 2) Backend auto-sync (no signature) — register-lite
-      setLoadingMessage('Syncing your profile...')
       // @ts-ignore
-      if ((registerTx as any)?.hash) {
-        // @ts-ignore
-        await registerLite((registerTx as any).hash)
+      const txHash: string | undefined = registerTx?.hash
+      if (txHash) {
+        setLoadingMessage('Syncing your profile…')
+        await registerLite(txHash)
       }
 
-      showSuccessToast('Registration successful! Redirecting to dashboard...')
+      showSuccessToast('Registration successful! Redirecting to dashboard…')
       await refreshStatus()
       navigate('/dashboard', { replace: true })
     } catch (error: any) {
@@ -283,7 +261,7 @@ const Register: React.FC = () => {
             <div style={styles.spinner} />
             <div style={{ fontWeight: 800, marginBottom: 4 }}>Processing</div>
             <div style={{ fontSize: '0.95rem', color: colors.textMuted }}>{loadingMessage}</div>
-            <div style={styles.smallNote}>You should see at most one wallet transaction now.</div>
+            <div style={styles.smallNote}>You should see only one transaction now.</div>
           </div>
         </div>
       )}
@@ -399,7 +377,7 @@ const Register: React.FC = () => {
                 </ul>
               </div>
               <p style={{ ...styles.smallNote, marginTop: 8 }}>
-                Pro tip: Enable USDT once on the login screen to skip approval here and during mining purchases.
+                Pro tip: Enable USDT once on the login screen to skip approvals during registration and mining purchases.
               </p>
             </Surface>
           </section>
