@@ -18,12 +18,11 @@ import {
   deleteNotice,
   getAdminNotices,
   type AdminNotice,
-  getAdminOverview,
-  type AdminOverviewResponse,
 } from '../services/api'
 import { showSuccessToast, showErrorToast } from '../utils/notification'
 import { ethers, BrowserProvider } from 'ethers'
 import UserToolsCard from '../components/admin/UserToolsCard'
+import AnalysisCard from '../components/common/AnalysisCard'
 
 // Theme colors
 const colors = {
@@ -179,16 +178,6 @@ const AdminDashboard: React.FC = () => {
     },
   })
 
-  // Overview totals (for Analysis card)
-  const { data: overview } = useQuery<AdminOverviewResponse>({
-    queryKey: ['adminOverview'],
-    enabled: allow,
-    refetchInterval: 60000,
-    queryFn: async () => (await getAdminOverview()).data,
-  })
-  const totalUsers = overview?.total_users ?? 0
-  const totalCoins = overview?.total_coins ?? 0
-
   // Post Notice form state
   type Tab = 'image' | 'script'
   const [postTab, setPostTab] = useState<Tab>('image')
@@ -207,7 +196,7 @@ const AdminDashboard: React.FC = () => {
     if (!account) return
     try {
       setIsPosting(true)
-      // using 'user_info' as generic purpose; backend validates owner address anyway for notices
+      // generic purpose; backend validates owner anyway for notices
       const { timestamp, signature } = await signAdminAction('user_info', account)
       const expires_in_sec = minutesToSeconds(expireMinutes)
 
@@ -333,7 +322,6 @@ const AdminDashboard: React.FC = () => {
               aria-expanded={menuOpen}
               aria-label="User menu"
             >
-              {/* You already have a separate UserMenu.tsx; can replace this block later */}
               <svg width={18} height={18} viewBox="0 0 24 24"><path d="M12 12a5 5 0 1 0-5-5 5.006 5.006 0 0 0 5 5zm0 2c-5 0-9 2.5-9 5.5V22h18v-2.5C21 16.5 17 14 12 14z" fill="currentColor"/></svg>
             </button>
             {menuOpen && (
@@ -499,13 +487,8 @@ const AdminDashboard: React.FC = () => {
             {/* User Tools (Admin) — extracted component */}
             <UserToolsCard allow={allow} adminAddress={account || ''} />
 
-            {/* Analysis (BOTTOM) — Only totals */}
-            <Surface title="Analysis" sub="Totals only">
-              <div style={{ ...styles.small }}>
-                Total users: <strong style={{ color: colors.accent }}>{overview?.total_users ?? 0}</strong>
-                {' '}• Total coins: <strong style={{ color: colors.accent }}>{Number(overview?.total_coins || 0).toFixed(0)}</strong>
-              </div>
-            </Surface>
+            {/* Analysis (BOTTOM) — Totals + Weekly Top 10 */}
+            <AnalysisCard limit={10} showTotals title="Analysis" />
           </div>
         )}
       </div>
