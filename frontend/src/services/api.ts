@@ -1,16 +1,16 @@
 import axios from 'axios'
 import { config } from '../config'
 
-// Normalize base URL
+// Normalize base URL (no trailing slash)
 const BASE = (config.apiBaseUrl || '').replace(/\/+$/, '')
 
 export const api = axios.create({
   baseURL: BASE,
-  timeout: 20000,
+  timeout: 20000, // default for reads
   headers: { 'Content-Type': 'application/json' },
 })
 
-// Sequential write queue
+// Simple write-queue: all write (POST/PATCH/DELETE) requests run sequentially
 let writeChain: Promise<void> = Promise.resolve()
 async function enqueueWrite<T>(fn: () => Promise<T>): Promise<T> {
   const p = writeChain.then(fn)
@@ -38,18 +38,19 @@ export type LoginResponse = {
   next_reset_utc_ms: number
 }
 
-// Public notices
+// Public notices (for user dashboard)
 export type PublicNotice = {
   id: number
   kind: 'image' | 'script'
   image_url?: string
   link_url?: string
   content_html?: string
+  priority?: number
   created_at?: string
   expires_at?: string | null
 }
 
-// Admin notice
+// Admin-side notice type
 export type AdminNotice = {
   id: number
   kind: 'image' | 'script'
@@ -62,16 +63,21 @@ export type AdminNotice = {
   expires_at?: string | null
 }
 
+// Admin: create/update payloads (no title; optional expiry)
 export type CreateNoticePayload = {
   address: string
   timestamp: number
   signature: string
   kind: 'image' | 'script'
+  // image
   image_url?: string
   link_url?: string
+  // script
   content_html?: string
+  // flags
   is_active?: boolean
   priority?: number
+  // expiry (pick one or none)
   expires_in_sec?: number
   expires_at?: string
 }
@@ -83,33 +89,47 @@ export type UpdateNoticePayload = Partial<Omit<CreateNoticePayload, 'kind'>> & {
   kind?: 'image' | 'script'
 }
 
-// Mining history
+// Mining history (backend DB)
 export type MiningHistoryItem = {
-  id: number
   tx_hash: string
   amount_usd: number
   daily_coins: number
-  start_date: string
+  start_date: string // YYYY-MM-DD (UTC)
   total_days: number
   credited_days: number
-  end_date: string
+  end_date: string // YYYY-MM-DD (UTC)
   active: boolean
   days_left: number
 }
 
-// Admin tools
+// Admin tools: user info/adjust coins/miner add/remove
+export type AdminOverviewResponse = { ok: boolean; total_users: number; total_coins: number }
+export type AdminTopReferrer = { address: string; userId: string; count: number }
+
 export type AdminUserInfo = {
-  user_id: string
-  wallet_address: string
-  coin_balance: number
-  logins: number
-  referral_coins: number
-  mining: {
-    purchases: number
-    mined_coins: number
+  ok: boolean
+  user?: {
+    user_id: string
+    wallet_address: string
+    coin_balance: number
+    logins: number
+    referral_coins: number
+    mining: { purchases: number; mined_coins: number }
+    created_at: string
   }
-  created_at: string
+  error?: string
 }
+
+export type AdjustCoinsResponse = { ok: boolean; wallet: string; coin_balance: number; error?: string }
+export type AdminMinerAddResponse = {
+  ok: boolean
+  wallet: string
+  daily_coins: number
+  total_days: number
+  start_date: string
+  credited_now: number
+}
+export type AdminMinerRemoveResponse = { ok: boolean; deducted: number }
 
 // ---------------- Health ----------------
 export const getHealth = () => api.get('/api/health')
@@ -130,7 +150,7 @@ export const markLogin = (address: string, timestamp: number, signature: string)
     api.post<LoginResponse>(`/api/users/${address}/login`, { timestamp, signature }, { timeout: 45000 })
   )
 
-// Smart helper: ensure + login in one go
+// Smart helper (optional): ensure + login in one go
 export const markLoginSmart = async (address: string) => {
   const { signAuthMessage } = await import('../utils/contract')
   const { timestamp, signature } = await signAuthMessage(address)
@@ -152,9 +172,27 @@ export const markLoginSmart = async (address: string) => {
 }
 
 // ---------------- Mining (off-chain record) ----------------
-// Lite: no signature needed
+export const recordMiningPurchase = async (address: string, txHash: string) => {
+  const { signAuthMessage } = await import('../utils/contract')
+  const { timestamp, signature } = await signAuthMessage(address)
+  return enqueueWrite(() =>
+    api.post(
+      '/api/mining/record-purchase',
+      { address, tx_hash: txHash, timestamp, signature },
+      { timeout: 45000 }
+    )
+  )
+}
+
+// NEW: Lite recorder — only tx hash (no signature)
 export const recordMiningPurchaseLite = async (txHash: string) =>
-  enqueueWrite(() => api.post('/api/mining/record-purchase-lite', { tx_hash: txHash }, { timeout: 45000 }))
+  enqueueWrite(() =>
+    api.post(
+      '/api/mining/record-purchase-lite',
+      { tx_hash: txHash },
+      { timeout: 45000 }
+    )
+  )
 
 // Mining history
 export const getMiningHistory = (address: string) =>
@@ -164,7 +202,7 @@ export const getMiningHistory = (address: string) =>
 export const getNotices = (params?: { limit?: number; active?: 0 | 1 }) =>
   api.get<{ notices: PublicNotice[] }>('/api/notices', { params })
 
-// ---------------- Admin: Notices ----------------
+// ---------------- Admin Notices (create/update/delete/list) ----------------
 export const createNotice = (payload: CreateNoticePayload) =>
   enqueueWrite(() => api.post('/api/notices', payload, { timeout: 45000 }))
 
@@ -177,25 +215,61 @@ export const deleteNotice = (id: number, payload: { address: string; timestamp: 
 export const getAdminNotices = (limit = 100) =>
   api.get<{ ok: boolean; notices: AdminNotice[] }>('/api/admin/notices', { params: { limit } })
 
-// ---------------- Admin: Analysis & Tools ----------------
+// ---------------- Admin (stats) ----------------
 export const getAdminOverview = () =>
   api.get<AdminOverviewResponse>('/api/admin/overview')
 
-export const getAdminUserInfo = (
-  payload: { address: string; timestamp: number; signature: string; user_id?: string; wallet?: string }
-) => api.post<{ ok: boolean; user: AdminUserInfo }>('/api/admin/user-info', payload)
+export const getAdminTopReferrers = (limit = 10) =>
+  api.get<{ ok: boolean; top: AdminTopReferrer[] }>('/api/admin/top-referrers', { params: { limit } })
 
-export const adjustUserCoins = (
-  payload: { address: string; timestamp: number; signature: string; user_id?: string; wallet?: string; delta: number; reason?: string }
-) => api.post('/api/admin/adjust-coins', payload)
+// ---------------- Admin Tools: user-info / adjust-coins / miner add-remove ----------------
+export const getAdminUserInfo = (payload: {
+  address: string
+  timestamp: number
+  signature: string
+  user_id?: string
+  wallet?: string
+}) =>
+  api.post<AdminUserInfo>('/api/admin/user-info', payload, { timeout: 30000 })
 
-export const adminAddMiner = (
-  payload: { address: string; timestamp: number; signature: string; wallet: string; amount_usd: number; start_date?: string; total_days?: number; tx_hash?: string }
-) => api.post('/api/admin/miner-add', payload)
+export const adjustUserCoins = (payload: {
+  address: string
+  timestamp: number
+  signature: string
+  user_id?: string
+  wallet?: string
+  delta: number
+  reason?: string
+}) =>
+  enqueueWrite(() =>
+    api.post<AdjustCoinsResponse>('/api/admin/adjust-coins', payload, { timeout: 45000 })
+  )
 
-export const adminRemoveMiner = (
-  payload: { address: string; timestamp: number; signature: string; wallet: string; id?: number; tx_hash?: string }
-) => api.post('/api/admin/miner-remove', payload)
+export const adminMinerAdd = (payload: {
+  address: string
+  timestamp: number
+  signature: string
+  wallet: string
+  amount_usd: number
+  start_date?: string
+  total_days?: number
+  tx_hash?: string
+}) =>
+  enqueueWrite(() =>
+    api.post<AdminMinerAddResponse>('/api/admin/miner-add', payload, { timeout: 45000 })
+  )
+
+export const adminMinerRemove = (payload: {
+  address: string
+  timestamp: number
+  signature: string
+  wallet: string
+  id?: number
+  tx_hash?: string
+}) =>
+  enqueueWrite(() =>
+    api.post<AdminMinerRemoveResponse>('/api/admin/miner-remove', payload, { timeout: 45000 })
+  )
 
 // ---------------- Bootstrap helper (legacy) ----------------
 export const getUserBootstrap = async (address: string) => {
@@ -204,7 +278,9 @@ export const getUserBootstrap = async (address: string) => {
     return { data: { action: 'redirect_dashboard' } }
   } catch (e: any) {
     const status = e?.response?.status || e?.status
-    if (status === 404) return { data: { action: 'await_backend_sync' } }
+    if (status === 404) {
+      return { data: { action: 'await_backend_sync' } }
+    }
     throw e
   }
 }
@@ -212,7 +288,7 @@ export const getUserBootstrap = async (address: string) => {
 // ---------------- Ensure profile (optional helper) ----------------
 export const ensureUserProfile = async (address: string) => {
   try {
-    await getStats(address)
+    await getStats(address) // exists → ok
     return { ensured: true, existed: true }
   } catch (e: any) {
     const status = e?.response?.status || e?.status
