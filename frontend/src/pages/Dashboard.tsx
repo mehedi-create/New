@@ -17,9 +17,9 @@ import Surface from '../components/common/Surface'
 import BottomNav from '../components/common/BottomNav'
 import BalanceCard from '../components/user/BalanceCard'            // On-chain $ balance + payout (with its own modal)
 import CoinBalanceCard from '../components/user/CoinBalanceCard'     // Off-chain coin balance + disabled withdraw
-import MiningCard from '../components/mining/MiningCard'             // One-click miner buy (allowance smart-check + recordPurchaseLite)
+import MiningCard from '../components/mining/MiningCard'             // One-click miner buy
 import MinerHistoryModal from '../components/mining/MinerHistoryModal'
-import StatsAndLoginCard from '../components/user/StatsAndLoginCard' // Daily login + referrals + auto upsert in its flow
+import StatsAndLoginCard from '../components/user/StatsAndLoginCard' // Daily login + referrals
 import ShareCard from '../components/user/ShareCard'                 // Referral code/link copy
 
 type OnChainData = {
@@ -30,7 +30,9 @@ type OnChainData = {
 
 const colors = {
   text: '#e8f9f1',
+  textMuted: 'rgba(232,249,241,0.75)',
   grayLine: 'rgba(255,255,255,0.12)',
+  accent: '#14b8a6',
 }
 
 const styles: Record<string, React.CSSProperties> = {
@@ -50,23 +52,29 @@ const styles: Record<string, React.CSSProperties> = {
 
   grid: { display: 'grid', gridTemplateColumns: '1fr', gap: 12, alignItems: 'stretch' },
   cardShell: { background: 'transparent', border: 'none', padding: 0 },
+
+  // Simple modal styles used in CoinInfoModal content
+  table: { width: '100%', borderCollapse: 'collapse' as const, color: colors.text },
+  th: { textAlign: 'left' as const, padding: '8px 10px', borderBottom: `1px solid ${colors.grayLine}`, fontWeight: 900, fontSize: 13 },
+  td: { padding: '8px 10px', borderBottom: `1px solid ${colors.grayLine}`, fontSize: 13 },
 }
 
-// Cookie helpers (persist tab + last mining amount if needed by MiningCard via defaultAmount prop)
-const setCookie = (name: string, value: string, days = 365) => {
+// Cookie helpers (persist tab)
+const setTabCookie = (value: 'home' | 'mining') => {
   try {
-    const maxAge = days * 24 * 60 * 60
+    const v = encodeURIComponent(value)
+    const maxAge = 365 * 24 * 60 * 60
     const secure = window.location.protocol === 'https:' ? '; Secure' : ''
-    document.cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)}; Path=/; Max-Age=${maxAge}; SameSite=Lax${secure}`
+    document.cookie = `activeTab=${v}; Path=/; Max-Age=${maxAge}; SameSite=Lax${secure}`
   } catch {}
 }
-const getCookie = (name: string): string | null => {
+const getTabCookie = (): 'home' | 'mining' => {
   try {
-    const key = `${encodeURIComponent(name)}=`
-    const parts = document.cookie.split('; ')
-    for (const p of parts) if (p.startsWith(key)) return decodeURIComponent(p.substring(key.length))
-  } catch {}
-  return null
+    const key = `${encodeURIComponent('activeTab')}=`
+    const found = document.cookie.split('; ').find(p => p.startsWith(key))
+    const val = found ? decodeURIComponent(found.substring(key.length)) : ''
+    return val === 'mining' ? 'mining' : 'home'
+  } catch { return 'home' }
 }
 
 const safeMoney = (val?: string) => { const n = parseFloat(val || '0'); return isNaN(n) ? '0.00' : n.toFixed(2) }
@@ -87,11 +95,9 @@ const Dashboard: React.FC = () => {
     }
   }, [])
 
-  // Tabs (persist)
-  const [activeTab, setActiveTabState] = useState<'home' | 'coins'>(
-    () => (getCookie('activeTab') === 'coins' ? 'coins' : 'home')
-  )
-  const setActiveTab = (t: 'home' | 'coins') => { setActiveTabState(t); setCookie('activeTab', t, 365) }
+  // Tabs (persist in cookie)
+  const [activeTab, setActiveTab] = useState<'home' | 'mining'>(getTabCookie())
+  useEffect(() => { setTabCookie(activeTab) }, [activeTab])
 
   // On-chain quick reads (for BalanceCard)
   const { data: onChainData } = useQuery<OnChainData | null>({
@@ -108,7 +114,7 @@ const Dashboard: React.FC = () => {
     },
   })
 
-  // Off-chain stats (for CoinBalanceCard + StatsAndLoginCard)
+  // Off-chain stats (for CoinBalanceCard)
   const { data: stats } = useQuery<StatsResponse | null>({
     queryKey: ['stats-lite', account],
     enabled: isValidAddress(account),
@@ -149,11 +155,7 @@ const Dashboard: React.FC = () => {
   // Miner history modal
   const [showHistory, setShowHistory] = useState(false)
 
-  const referralCode = useMemo(() => (userId || '').toUpperCase(), [userId])
-  const referralLink = useMemo(() => `${window.location.origin}/register?ref=${referralCode}`, [referralCode])
-  const displayUserId = useMemo(() => (userId || stats?.userId || 'USER').toUpperCase(), [userId, stats?.userId])
-
-  // Coin info (simple info modal trigger for CoinBalanceCard)
+  // Coin info modal (detailed)
   const [showCoinInfo, setShowCoinInfo] = useState(false)
   const CoinInfoModal = () => {
     if (!showCoinInfo) return null
@@ -171,14 +173,39 @@ const Dashboard: React.FC = () => {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
               <div style={{ fontWeight: 900 }}>How to earn coins</div>
               <button
-                style={{ height: 32, width: 32, borderRadius: 8, background: 'rgba(255,255,255,0.06)', color: colors.text, border: `1px solid ${colors.grayLine}`, display: 'grid', placeItems: 'center', cursor: 'pointer' }}
+                style={{
+                  height: 32, width: 32, borderRadius: 8,
+                  background: 'rgba(255,255,255,0.06)', color: colors.text,
+                  border: `1px solid ${colors.grayLine}`, display: 'grid', placeItems: 'center', cursor: 'pointer'
+                }}
                 onClick={() => setShowCoinInfo(false)}
+                aria-label="Close"
               >
                 ✕
               </button>
             </div>
-            <div style={{ fontSize: 13, opacity: .85 }}>
-              • Daily login (+1/day) • Referrals (+5) • Mining (USDT → daily coins for 30 days)
+
+            <div style={{ border: `1px solid ${colors.grayLine}`, borderRadius: 12, overflow: 'hidden' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 120px', padding: '8px 10px', borderBottom: `1px solid ${colors.grayLine}`, fontWeight: 800 }}>
+                <div>Action</div><div style={{ textAlign: 'right' }}>Coins</div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 120px', padding: '8px 10px', borderBottom: `1px solid ${colors.grayLine}` }}>
+                <div>Daily login</div><div style={{ textAlign: 'right' }}>+1 coin/day</div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 120px', padding: '8px 10px', borderBottom: `1px solid ${colors.grayLine}` }}>
+                <div>Per referral</div><div style={{ textAlign: 'right' }}>+5 coins</div>
+              </div>
+              <div style={{ padding: '8px 10px' }}>
+                <div style={{ fontWeight: 800, marginBottom: 4 }}>Mining</div>
+                <div style={{ fontSize: 13, color: colors.textMuted }}>
+                  Earn coins daily equal to your invested USDT, for 30 days.
+                  <br />Example: invest $5 USDT → 5 coins/day × 30 days.
+                </div>
+              </div>
+            </div>
+
+            <div style={{ marginTop: 10, textAlign: 'right' }}>
+              <button className="lxr-buy-btn" onClick={() => setShowCoinInfo(false)}>Got it</button>
             </div>
           </div>
         </div>
@@ -186,6 +213,7 @@ const Dashboard: React.FC = () => {
     )
   }
 
+  // Home tab
   const renderHome = () => (
     <div style={styles.grid}>
       {/* On-chain $ balance + payout (modal handled inside component) */}
@@ -199,44 +227,45 @@ const Dashboard: React.FC = () => {
         <NoticeCarousel autoIntervalMs={5000} limit={10} />
       </div>
 
-      {/* Share & Earn */}
-      <ShareCard referralCode={referralCode} referralLink={referralLink} />
+      {/* Referral share card */}
+      <ShareCard
+        referralCode={(userId || '').toUpperCase()}
+        referralLink={`${window.location.origin}/register?ref=${(userId || '').toUpperCase()}`}
+      />
     </div>
   )
 
-  const renderCoinsTab = () => (
+  // Mining tab (all cards remain; MiningCard not overlayed on any other card)
+  const renderMining = () => (
     <div style={styles.grid}>
-      {/* Off-chain coin balance + disabled withdraw */}
+      {/* Off-chain coin balance + disabled withdraw; info opens detailed modal */}
       <div style={styles.cardShell}>
         <CoinBalanceCard coinBalance={Number(stats?.coin_balance ?? 0)} onInfo={() => setShowCoinInfo(true)} />
       </div>
 
-      {/* Mining (one-click) + History modal open from header action */}
+      {/* Mining card — direct (no Surface wrapper) */}
       <div style={styles.cardShell}>
-        <Surface>
-          <div style={{ textAlign: 'center', margin: '6px 0 10px', fontSize: 16, fontWeight: 900 }}>
-            Mining
-          </div>
-          <MiningCard
-            account={account}
-            minAmount={5}
-            defaultAmount={getCookie('miningAmount') || '5.00'}
-            onAfterPurchase={async () => {
-              // Refresh dashboards after buy
-              queryClient.invalidateQueries({ queryKey: ['onChainData', account] })
-              queryClient.invalidateQueries({ queryKey: ['stats-lite', account] })
-            }}
-            onShowHistory={() => setShowHistory(true)}
-          />
-        </Surface>
+        <MiningCard
+          account={account}
+          minAmount={5}
+          defaultAmount={'5.00'}
+          onAfterPurchase={async () => {
+            // Refresh dashboards after buy
+            queryClient.invalidateQueries({ queryKey: ['onChainData', account] })
+            queryClient.invalidateQueries({ queryKey: ['stats-lite', account] })
+          }}
+          onShowHistory={() => setShowHistory(true)}
+        />
       </div>
 
-      {/* Your Stats + Daily login (component handles its own markLogin + upsert fallback) */}
+      {/* Your stats + daily login */}
       <div style={styles.cardShell}>
         <StatsAndLoginCard account={account} />
       </div>
     </div>
   )
+
+  const displayUserId = useMemo(() => (userId || stats?.userId || 'USER').toUpperCase(), [userId, stats?.userId])
 
   return (
     <div style={styles.page}>
@@ -250,7 +279,13 @@ const Dashboard: React.FC = () => {
           <div className="lxr-lexori-logo" style={styles.brand as any}>Web3 Community</div>
           <div style={styles.userMenuWrap} ref={menuRef}>
             <span style={styles.userIdText} title={displayUserId}>{displayUserId}</span>
-            <button style={styles.userMenuBtn} onClick={() => setMenuOpen(v => !v)} aria-haspopup="menu" aria-expanded={menuOpen} aria-label="User menu">
+            <button
+              style={styles.userMenuBtn}
+              onClick={() => setMenuOpen(v => !v)}
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              aria-label="User menu"
+            >
               <svg width={18} height={18} viewBox="0 0 24 24"><path d="M12 12a5 5 0 1 0-5-5 5.006 5.006 0 0 0 5 5zm0 2c-5 0-9 2.5-9 5.5V22h18v-2.5C21 16.5 17 14 12 14z" fill="currentColor"/></svg>
             </button>
             {menuOpen && (
@@ -267,7 +302,7 @@ const Dashboard: React.FC = () => {
         </div>
 
         {/* Tabs */}
-        {activeTab === 'home' ? renderHome() : renderCoinsTab()}
+        {activeTab === 'home' ? renderHome() : renderMining()}
       </div>
 
       {/* Bottom nav */}
@@ -281,11 +316,11 @@ const Dashboard: React.FC = () => {
             onClick: () => setActiveTab('home'),
           },
           {
-            key: 'coins',
+            key: 'mining',
             icon: <svg width={20} height={20} viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="2" fill="none"/><circle cx="12" cy="12" r="4.5" stroke="currentColor" strokeWidth="2" fill="none"/></svg>,
-            label: 'Coins',
-            active: activeTab === 'coins',
-            onClick: () => setActiveTab('coins'),
+            label: 'Mining',
+            active: activeTab === 'mining',
+            onClick: () => setActiveTab('mining'),
           },
         ]}
         columns={2}
