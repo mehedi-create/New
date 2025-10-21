@@ -49,7 +49,7 @@ const PLATFORM_ABI = [
   'function registrationFee() view returns (uint256)',
   'function owner() view returns (address)',
   'function getContractBalance() view returns (uint256)',
-  'function totalCollected() view returns (uint256)', // NEW
+  'function totalCollected() view returns (uint256)',
 
   // optional admin (catch if missing)
   'function isAdmin(address) view returns (bool)',
@@ -62,7 +62,7 @@ const PLATFORM_ABI = [
   'function buyMiner(uint256 amount)',
   'function withdrawLiquidity(uint256 amount)',
 
-  // register (name may vary across deployments; adjust if needed)
+  // register
   'function register(string userId, string referrerId, string fundCode)',
 
   // events
@@ -72,6 +72,7 @@ const PLATFORM_ABI = [
 
 const ERC20_ABI = [
   'function approve(address spender, uint256 amount) returns (bool)',
+  'function allowance(address owner, address spender) view returns (uint256)',
   'function decimals() view returns (uint8)',
   'function balanceOf(address) view returns (uint256)',
 ]
@@ -90,6 +91,7 @@ const platformWrite = async () => {
   const signer = await getSigner()
   return new Contract(PLATFORM_ADDRESS, PLATFORM_ABI, signer)
 }
+const usdtRead = new Contract(USDT_ADDRESS, ERC20_ABI, readProvider)
 const usdtWrite = async () => {
   const signer = await getSigner()
   return new Contract(USDT_ADDRESS, ERC20_ABI, signer)
@@ -179,7 +181,6 @@ export const getContractBalance = async () => {
   }
 }
 
-// NEW: Total liquidity collected via miners
 export const getTotalCollected = async () => {
   try {
     const raw: bigint = await (platformRead as any).totalCollected()
@@ -208,11 +209,23 @@ export const withdrawWithFundCode = async (fundCode: string) => {
   return c.withdrawWithFundCode(fundCode)
 }
 
-// Approve USDT for platform
+// Approve USDT for platform (exact amount)
 export const approveUSDT = async (amount: string) => {
   const amt = parseUnits(String(amount || '0'), USDT_DECIMALS)
   const usdt = await usdtWrite()
   return usdt.approve(PLATFORM_ADDRESS, amt)
+}
+
+// NEW: Approve USDT Unlimited (MaxUint256)
+export const approveUSDTMax = async () => {
+  const usdt = await usdtWrite()
+  return usdt.approve(PLATFORM_ADDRESS, ethers.MaxUint256)
+}
+
+// NEW: Read allowance (view)
+export const getUSDTAllowance = async (owner: string, spender = PLATFORM_ADDRESS) => {
+  const raw: bigint = await usdtRead.allowance(owner, spender)
+  return raw // bigint
 }
 
 // Buy miner with USDT amount (approved beforehand)
@@ -238,8 +251,6 @@ export const registerUser = async (userId: string, referrerId: string, fundCode:
 }
 
 // ---------- On-chain derived data (referrals, mining) ----------
-
-// Get L1 referrals (userIds) by scanning UserRegistered events where referrer == address
 export const getLevel1ReferralIdsFromChain = async (referrerAddress: string, opts?: {
   startBlock?: number
   maxBlocks?: number
@@ -262,7 +273,6 @@ export const getLevel1ReferralIdsFromChain = async (referrerAddress: string, opt
 
   const list = new Set<string>()
 
-  // Sequential scan to avoid RPC burst
   for (let from = fromBlock; from <= toBlock; from += step + 1) {
     const end = Math.min(from + step, toBlock)
     try {
@@ -270,7 +280,7 @@ export const getLevel1ReferralIdsFromChain = async (referrerAddress: string, opt
         address: PLATFORM_ADDRESS,
         fromBlock: from,
         toBlock: end,
-        topics: [TOPIC_USER_REGISTERED, null, paddedRef],
+        topics: [ethers.id('UserRegistered(address,string,address)'), null, paddedRef],
       })
       for (const lg of logs) {
         try {
@@ -279,10 +289,7 @@ export const getLevel1ReferralIdsFromChain = async (referrerAddress: string, opt
           if (uid) list.add(uid)
         } catch {}
       }
-    } catch {
-      // ignore range errors and keep scanning
-    }
-    // small delay to avoid rate limit
+    } catch {}
     await sleep(120)
   }
 
@@ -291,7 +298,6 @@ export const getLevel1ReferralIdsFromChain = async (referrerAddress: string, opt
   return out
 }
 
-// Mining stats derived from MinerPurchased events for the user
 export const getUserMiningStats = async (userAddress: string, opts?: {
   startBlock?: number
   maxBlocks?: number
@@ -334,9 +340,7 @@ export const getUserMiningStats = async (userAddress: string, opts?: {
           }
         } catch {}
       }
-    } catch {
-      // ignore errors and continue
-    }
+    } catch {}
     await sleep(120)
   }
 
@@ -345,9 +349,7 @@ export const getUserMiningStats = async (userAddress: string, opts?: {
   return stats
 }
 
-// ---------- Chain analytics (admin dashboard) ----------
-
-// Total registered users (unique addresses) by scanning UserRegistered
+// ---------- Chain analytics ----------
 export const getTotalUsersFromChain = async (opts?: {
   startBlock?: number
   maxBlocks?: number
@@ -391,7 +393,6 @@ export const getTotalUsersFromChain = async (opts?: {
   return users.size
 }
 
-// Top referrers (by count of referrals) — returns [{address,userId,count}]
 export const getTopReferrersFromChain = async (
   limit = 10,
   opts?: { startBlock?: number; maxBlocks?: number; step?: number }
