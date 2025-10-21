@@ -1,10 +1,13 @@
-import React, { useMemo, useRef, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useWallet } from '../context/WalletContext'
 import {
   getUserBalance,
   hasSetFundCode,
   getRegistrationFee,
+  getUserMiningStats,
+  isRegistered,
+  signAuthMessage,
 } from '../utils/contract'
 import { isValidAddress } from '../utils/wallet'
 import NoticeCarousel from '../components/NoticeCarousel'
@@ -17,6 +20,9 @@ import MiningCard from '../components/mining/MiningCard'
 import MinerHistoryModal from '../components/mining/MinerHistoryModal'
 import StatsAndLoginCard from '../components/user/StatsAndLoginCard'
 import ShareCard from '../components/user/ShareCard'
+
+import { ensureUserProfile, getStats, upsertUserFromChain } from '../services/api'
+import { showErrorToast } from '../utils/notification'
 
 // Theme
 const colors = {
@@ -41,6 +47,23 @@ const styles: Record<string, React.CSSProperties> = {
   },
 }
 
+// Cookie helpers (persist tab)
+const setCookie = (name: string, value: string, days = 365) => {
+  try {
+    const maxAge = days * 24 * 60 * 60
+    const secure = window.location.protocol === 'https:' ? '; Secure' : ''
+    document.cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)}; Path=/; Max-Age=${maxAge}; SameSite=Lax${secure}`
+  } catch {}
+}
+const getCookie = (name: string): string | null => {
+  try {
+    const key = `${encodeURIComponent(name)}=`
+    const parts = document.cookie.split('; ')
+    for (const p of parts) if (p.startsWith(key)) return decodeURIComponent(p.substring(key.length))
+  } catch {}
+  return null
+}
+
 // Helpers
 const safeMoney = (val?: string) => { const n = parseFloat(val || '0'); return isNaN(n) ? '0.00' : n.toFixed(2) }
 
@@ -52,13 +75,15 @@ type OnChainData = {
 
 const Dashboard: React.FC = () => {
   const { account, userId, disconnect } = useWallet()
+  const queryClient = useQueryClient()
 
   // Top bar dropdown (light)
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement | null>(null)
 
-  // Tabs
-  const [activeTab, setActiveTab] = useState<'home' | 'surprise'>('home')
+  // Tabs (persist to cookie, like before)
+  const [activeTab, setActiveTabState] = useState<'home' | 'surprise'>(() => (getCookie('activeTab') === 'surprise' ? 'surprise' : 'home'))
+  const setActiveTab = (t: 'home' | 'surprise') => { setActiveTabState(t); setCookie('activeTab', t, 365) }
 
   // On-chain quick reads
   const { data: onChainData } = useQuery<OnChainData | null>({
@@ -74,6 +99,48 @@ const Dashboard: React.FC = () => {
       return { userBalance: balance, hasFundCode: hasCode, registrationFee: fee }
     },
   })
+
+  // On-chain mining stats (restore; warm the data like earlier)
+  useQuery<{ count: number; totalDeposited: string }>({
+    queryKey: ['miningStats', account],
+    enabled: isValidAddress(account),
+    refetchInterval: 60000,
+    queryFn: async () => {
+      if (!isValidAddress(account)) return { count: 0, totalDeposited: '0.00' }
+      return getUserMiningStats(account!)
+    },
+  })
+
+  // Proactive ensure off-chain profile if on-chain registered (restore)
+  useEffect(() => {
+    if (!isValidAddress(account)) return
+    let cancelled = false
+    const run = async () => {
+      try {
+        const registered = await isRegistered(account!)
+        if (!registered) return
+        // Check if stats exists
+        let exists = false
+        try {
+          const res = await getStats(account!)
+          exists = !!res?.data?.userId
+        } catch (err: any) {
+          const status = err?.response?.status || err?.status
+          if (status !== 404) return
+        }
+        if (!exists) {
+          // Attempt upsert
+          try {
+            await ensureUserProfile(account!)
+            // refresh dependent queries
+            queryClient.invalidateQueries({ queryKey: ['stats-lite', account] })
+          } catch {}
+        }
+      } catch {}
+    }
+    run()
+    return () => { cancelled = true }
+  }, [account, queryClient])
 
   // Referral code/link
   const referralCode = useMemo(() => (userId || '').toUpperCase(), [userId])
@@ -140,7 +207,13 @@ const Dashboard: React.FC = () => {
               <MiningCard
                 account={account}
                 minAmount={5}
-                defaultAmount="5.00"
+                defaultAmount={getCookie('miningAmount') || '5.00'}
+                onAfterPurchase={async () => {
+                  // restore: invalidate caches after buy
+                  queryClient.invalidateQueries({ queryKey: ['onChainData.v2', account] })
+                  queryClient.invalidateQueries({ queryKey: ['stats-lite', account] })
+                  queryClient.invalidateQueries({ queryKey: ['miningStats', account] })
+                }}
                 onShowHistory={() => setShowHistory(true)}
               />
             </Surface>
