@@ -12,19 +12,14 @@ import {
   withdrawLiquidity,
   getTotalCollected,
 } from '../utils/contract'
-import {
-  createNotice,
-  updateNotice,
-  deleteNotice,
-  getAdminNotices,
-  type AdminNotice,
-  getAdminOverview,
-  type AdminOverviewResponse,
-} from '../services/api'
 import { showSuccessToast, showErrorToast } from '../utils/notification'
-import { ethers, BrowserProvider } from 'ethers'
+
+// Components
+import Surface from '../components/common/Surface'
 import UserToolsCard from '../components/admin/UserToolsCard'
 import AnalysisCard from '../components/common/AnalysisCard'
+import NoticeForm from '../components/admin/NoticeForm'
+import NoticeList from '../components/admin/NoticeList'
 
 // Theme colors
 const colors = {
@@ -83,40 +78,6 @@ const styles: Record<string, React.CSSProperties> = {
   navBtnActive: { background: `linear-gradient(45deg, ${colors.accent}, ${colors.accentSoft})`, color: '#0b1b3b', borderColor: colors.accent },
 }
 
-// Surface wrapper
-const Surface: React.FC<{ children: React.ReactNode; style?: React.CSSProperties; title?: string; sub?: string }> = ({ children, style, title, sub }) => (
-  <div className="lxr-surface" style={style}>
-    <div className="lxr-surface-lines" />
-    <div className="lxr-surface-mesh" />
-    <div className="lxr-surface-circuit" />
-    <div className="lxr-surface-holo" />
-    <div style={{ position: 'relative', zIndex: 2 }}>
-      {title && (
-        <div style={{ fontWeight: 900, marginBottom: 6 }}>
-          {title} {sub && <span style={{ ...styles.small, marginLeft: 6 }}>{sub}</span>}
-        </div>
-      )}
-      {children}
-    </div>
-  </div>
-)
-
-// Helper: sign admin action with exact message the backend expects
-const signAdminAction = async (
-  purpose: 'create_notice' | 'update_notice' | 'delete_notice' | 'user_info' | 'adjust_coins' | 'miner_add' | 'miner_remove',
-  adminAddress: string
-) => {
-  const provider = new BrowserProvider((window as any).ethereum)
-  const signer = await provider.getSigner()
-  const ts = Math.floor(Date.now() / 1000)
-  const message = `Admin action authorization
-Purpose: ${purpose}
-Address: ${ethers.getAddress(adminAddress)}
-Timestamp: ${ts}`
-  const signature = await signer.signMessage(message)
-  return { timestamp: ts, signature }
-}
-
 const AdminDashboard: React.FC = () => {
   const { account, disconnect } = useWallet()
   const navigate = useNavigate()
@@ -171,112 +132,6 @@ const AdminDashboard: React.FC = () => {
       return { commission, balance, totalCollected }
     },
   })
-
-  // Notices list (admin manage)
-  const { data: adminList = [], refetch: refetchAdminList, isFetching: isListFetching } = useQuery<AdminNotice[]>({
-    queryKey: ['adminNotices'],
-    enabled: allow,
-    refetchInterval: 30000,
-    queryFn: async () => {
-      const res = await getAdminNotices(150)
-      return res.data.notices || []
-    },
-  })
-
-  // Overview totals (for bottom Analysis card)
-  const { data: overview } = useQuery<AdminOverviewResponse>({
-    queryKey: ['adminOverviewAdmin'],
-    enabled: allow,
-    refetchInterval: 60000,
-    queryFn: async () => (await getAdminOverview()).data,
-  })
-
-  // Post Notice form state
-  type Tab = 'image' | 'script'
-  const [postTab, setPostTab] = useState<Tab>('image')
-  const [imageUrl, setImageUrl] = useState('')
-  const [linkUrl, setLinkUrl] = useState('')
-  const [scriptContent, setScriptContent] = useState('')
-  const [expireMinutes, setExpireMinutes] = useState<string>('') // blank = permanent
-  const [isPosting, setIsPosting] = useState(false)
-
-  const minutesToSeconds = (mStr: string) => {
-    const m = Number(mStr || '0')
-    return Number.isFinite(m) && m > 0 ? Math.round(m * 60) : undefined
-  }
-
-  const onPostNotice = async () => {
-    if (!account) return
-    try {
-      setIsPosting(true)
-      const { timestamp, signature } = await signAdminAction('create_notice', account)
-      const expires_in_sec = minutesToSeconds(expireMinutes)
-
-      if (postTab === 'image') {
-        if (!imageUrl.trim()) { showErrorToast('Please provide image URL'); return }
-        await createNotice({
-          address: account,
-          timestamp, signature,
-          kind: 'image',
-          image_url: imageUrl.trim(),
-          link_url: (linkUrl || '').trim(),
-          is_active: true,
-          priority: 0,
-          ...(expires_in_sec ? { expires_in_sec } : {}),
-        })
-      } else {
-        if (!scriptContent.trim()) { showErrorToast('Please provide script content'); return }
-        await createNotice({
-          address: account,
-          timestamp, signature,
-          kind: 'script',
-          content_html: scriptContent,
-          is_active: true,
-          priority: 0,
-          ...(expires_in_sec ? { expires_in_sec } : {}),
-        })
-      }
-
-      showSuccessToast('Notice posted')
-      setImageUrl(''); setLinkUrl(''); setScriptContent(''); setExpireMinutes('')
-      refetchAdminList()
-    } catch (e) {
-      showErrorToast(e, 'Failed to post notice')
-    } finally {
-      setIsPosting(false)
-    }
-  }
-
-  // Manage: delete notice
-  const deleteOne = async (id: number) => {
-    if (!account) return
-    if (!window.confirm('Delete this notice?')) return
-    try {
-      const { timestamp, signature } = await signAdminAction('delete_notice', account)
-      await deleteNotice(id, { address: account, timestamp, signature })
-      showSuccessToast('Deleted')
-      refetchAdminList()
-    } catch (e) {
-      showErrorToast(e, 'Failed to delete')
-    }
-  }
-
-  // Manage: quick expiry in minutes
-  const setExpiryMinutes = async (id: number, minutes: number) => {
-    if (!account) return
-    if (!(minutes > 0)) { showErrorToast('Enter minutes > 0'); return }
-    try {
-      const { timestamp, signature } = await signAdminAction('update_notice', account)
-      await updateNotice(id, {
-        address: account, timestamp, signature,
-        expires_in_sec: Math.round(minutes * 60),
-      })
-      showSuccessToast('Expiry set')
-      refetchAdminList()
-    } catch (e) {
-      showErrorToast(e, 'Failed to set expiry')
-    }
-  }
 
   // Finance handlers
   const [liqAmount, setLiqAmount] = useState<string>('')
@@ -350,119 +205,25 @@ const AdminDashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* Tabs content */}
+        {/* Tabs content (no top nav; only bottom nav) */}
         {activeTab === 'home' ? (
           <div style={styles.grid}>
-            {/* Post Notice */}
-            <Surface title="Post Notice" sub="Image or Script • optional expiry (minutes)">
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 8, marginBottom: 8 }}>
-                <button
-                  style={{ ...styles.input, height: 44, cursor: 'pointer' }}
-                  onClick={() => setPostTab('image')}
-                >
-                  Image
-                </button>
-                <button
-                  style={{ ...styles.input, height: 44, cursor: 'pointer' }}
-                  onClick={() => setPostTab('script')}
-                >
-                  Script
-                </button>
-              </div>
+            {/* Post Notice — component handles owner-sign with purpose=create_notice */}
+            <NoticeForm
+              adminAddress={account || ''}
+              onPosted={() => {
+                // optionally trigger a toast or local UI action; NoticeList refreshes itself
+              }}
+            />
 
-              {postTab === 'image' ? (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 8 }}>
-                  <div>
-                    <div style={{ ...styles.small, marginBottom: 4 }}>Image URL</div>
-                    <input style={styles.input} value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="https://..." />
-                  </div>
-                  <div>
-                    <div style={{ ...styles.small, marginBottom: 4 }}>Link URL (open on click)</div>
-                    <input style={styles.input} value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} placeholder="https://..." />
-                  </div>
-                  <div>
-                    <div style={{ ...styles.small, marginBottom: 4 }}>Expires in (minutes) — leave blank to keep</div>
-                    <input style={styles.input} value={expireMinutes} onChange={(e) => setExpireMinutes(e.target.value)} placeholder="e.g., 60" />
-                  </div>
-                  <div>
-                    <button className="lxr-buy-btn" onClick={onPostNotice} disabled={isPosting}>
-                      {isPosting ? 'POSTING...' : 'Post Image Notice'}
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 8 }}>
-                  <div>
-                    <div style={{ ...styles.small, marginBottom: 4 }}>Script content</div>
-                    <textarea
-                      style={{ ...styles.input, minHeight: 120, padding: 10 }}
-                      value={scriptContent}
-                      onChange={(e) => setScriptContent(e.target.value)}
-                      placeholder={`console.log('Hello');`}
-                    />
-                  </div>
-                  <div>
-                    <div style={{ ...styles.small, marginBottom: 4 }}>Expires in (minutes) — leave blank to keep</div>
-                    <input style={styles.input} value={expireMinutes} onChange={(e) => setExpireMinutes(e.target.value)} placeholder="e.g., 120" />
-                  </div>
-                  <div>
-                    <button className="lxr-buy-btn" onClick={onPostNotice} disabled={isPosting}>
-                      {isPosting ? 'POSTING...' : 'Post Script Notice'}
-                    </button>
-                  </div>
-                </div>
-              )}
-            </Surface>
-
-            {/* Manage Notices */}
-            <Surface title="Manage Notices" sub={isListFetching ? 'Refreshing…' : `Total: ${adminList.length}`}>
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', color: colors.text }}>
-                  <thead>
-                    <tr>
-                      <th style={{ textAlign: 'left', padding: '8px 10px', borderBottom: `1px solid ${colors.grayLine}` }}>ID</th>
-                      <th style={{ textAlign: 'left', padding: '8px 10px', borderBottom: `1px solid ${colors.grayLine}` }}>Kind</th>
-                      <th style={{ textAlign: 'left', padding: '8px 10px', borderBottom: `1px solid ${colors.grayLine}` }}>Status</th>
-                      <th style={{ textAlign: 'left', padding: '8px 10px', borderBottom: `1px solid ${colors.grayLine}` }}>Preview</th>
-                      <th style={{ textAlign: 'left', padding: '8px 10px', borderBottom: `1px solid ${colors.grayLine}` }}>Expires</th>
-                      <th style={{ textAlign: 'right', padding: '8px 10px', borderBottom: `1px solid ${colors.grayLine}` }}>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(adminList || []).map((n) => {
-                      const isExpired = !!n.expires_at && new Date(n.expires_at).getTime() <= Date.now()
-                      const statusText = isExpired ? 'Expired' : (n.is_active ? 'Active' : 'Inactive')
-                      const expires = n.expires_at ? new Date(n.expires_at).toLocaleString() : '—'
-                      const preview = n.kind === 'image' ? (n.image_url || '').slice(0, 32) : (n.content_html || '').slice(0, 32)
-                      return (
-                        <tr key={n.id}>
-                          <td style={{ padding: '8px 10px', borderBottom: `1px solid ${colors.grayLine}` }}>{n.id}</td>
-                          <td style={{ padding: '8px 10px', borderBottom: `1px solid ${colors.grayLine}` }}>{n.kind}</td>
-                          <td style={{ padding: '8px 10px', borderBottom: `1px solid ${colors.grayLine}` }}>
-                            <span style={{ color: isExpired ? colors.textMuted : colors.accent, fontWeight: 800 }}>{statusText}</span>
-                          </td>
-                          <td style={{ padding: '8px 10px', borderBottom: `1px solid ${colors.grayLine}` }} title={n.kind === 'image' ? (n.image_url || '') : ''}>
-                            {preview || '—'}
-                          </td>
-                          <td style={{ padding: '8px 10px', borderBottom: `1px solid ${colors.grayLine}` }}>{expires}</td>
-                          <td style={{ padding: '8px 10px', borderBottom: `1px solid ${colors.grayLine}`, textAlign: 'right' }}>
-                            <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
-                              <QuickExpiry onSet={async (mins) => setExpiryMinutes(n.id, mins)} />
-                              <button style={styles.buttonDanger} onClick={() => deleteOne(n.id)}>Delete</button>
-                            </div>
-                          </td>
-                        </tr>
-                      )
-                    })}
-                    {(!adminList || adminList.length === 0) && (
-                      <tr>
-                        <td colSpan={6} style={{ padding: '8px 10px', borderBottom: `1px solid ${colors.grayLine}`, color: colors.textMuted }}>No notices</td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </Surface>
+            {/* Manage Notices — owner-sign update/delete inside component */}
+            <NoticeList
+              adminAddress={account || ''}
+              allow={allow}
+              onChanged={() => {
+                // optional: any side-effects after change
+              }}
+            />
           </div>
         ) : (
           <div style={styles.grid}>
@@ -534,32 +295,6 @@ const AdminDashboard: React.FC = () => {
           </div>
         </div>
       </div>
-    </div>
-  )
-}
-
-// Quick expiry setter
-const QuickExpiry: React.FC<{ onSet: (mins: number) => void }> = ({ onSet }) => {
-  const [mins, setMins] = useState<string>('')
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-      <input
-        style={{ height: 34, borderRadius: 8, border: '2px solid rgba(20,184,166,0.3)', padding: '0 8px', background: 'rgba(255,255,255,0.05)', color: colors.text, width: 90 }}
-        placeholder="mins"
-        value={mins}
-        onChange={(e) => setMins(e.target.value)}
-      />
-      <button
-        style={{ height: 34, borderRadius: 8, border: 'none', cursor: 'pointer', padding: '0 10px', fontWeight: 800, background: `linear-gradient(45deg, ${colors.accent}, ${colors.accentSoft})`, color: '#0b1b3b' }}
-        onClick={() => {
-          const v = Number(mins || '0')
-          if (!Number.isFinite(v) || v <= 0) { showErrorToast('Enter minutes > 0'); return }
-          onSet(v)
-          setMins('')
-        }}
-      >
-        Set expiry
-      </button>
     </div>
   )
 }
