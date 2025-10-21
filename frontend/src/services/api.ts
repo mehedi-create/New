@@ -90,7 +90,9 @@ export type UpdateNoticePayload = Partial<Omit<CreateNoticePayload, 'kind'>> & {
 }
 
 // Mining history (backend DB)
+// FIX: include id to match backend response used in AdminDashboard
 export type MiningHistoryItem = {
+  id: number
   tx_hash: string
   amount_usd: number
   daily_coins: number
@@ -219,6 +221,7 @@ export const getAdminNotices = (limit = 100) =>
 export const getAdminOverview = () =>
   api.get<AdminOverviewResponse>('/api/admin/overview')
 
+// Optional (if backend has it; safe to keep)
 export const getAdminTopReferrers = (limit = 10) =>
   api.get<{ ok: boolean; top: AdminTopReferrer[] }>('/api/admin/top-referrers', { params: { limit } })
 
