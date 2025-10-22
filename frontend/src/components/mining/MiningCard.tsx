@@ -9,19 +9,19 @@ import { showErrorToast, showSuccessToast } from '../../utils/notification'
 const colors = {
   accent: '#14b8a6',
   accent2: '#0ea5a5',
-  text: '#e8f9f1',
-  textMuted: 'rgba(232,249,241,0.75)',
+  text: '#ffffff',       // all text white
+  textMuted: '#ffffff',  // muted text also white as requested
   grayLine: 'rgba(255,255,255,0.12)',
 }
 
 const styles: Record<string, React.CSSProperties> = {
   cardShell: { background: 'transparent', border: 'none', padding: 0 },
-  contentWrap: { position: 'relative', zIndex: 2, padding: '16px 14px 18px' },
+  contentWrap: { position: 'relative', zIndex: 2, padding: '16px 14px 18px', color: colors.text },
 
   // Header
   headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
-  headerTitle: { fontSize: 22, fontWeight: 900, letterSpacing: 1 },
-  headerSub: { fontSize: 11, fontWeight: 700, letterSpacing: 1, color: colors.accent },
+  headerTitle: { fontSize: 22, fontWeight: 900, letterSpacing: 1, color: colors.text },
+  headerSub: { fontSize: 11, fontWeight: 700, letterSpacing: 1, color: colors.text },
 
   // Controls
   formGrid: {
@@ -32,10 +32,10 @@ const styles: Record<string, React.CSSProperties> = {
     rowGap: 6,
     alignItems: 'center',
   },
-  label: { fontSize: 12, fontWeight: 800, color: colors.accent },
+  label: { fontSize: 12, fontWeight: 800, color: colors.text },
   labelPlaceholder: { fontSize: 12, fontWeight: 800, color: 'transparent', visibility: 'hidden' }, // keeps rows aligned
   input: {
-    height: 48, borderRadius: 12, border: '2px solid rgba(20,184,166,0.3)',
+    height: 48, borderRadius: 12, border: '2px solid rgba(255,255,255,0.35)',
     padding: '0 12px', background: 'rgba(255,255,255,0.06)', outline: 'none',
     color: colors.text, fontSize: 15, width: '100%',
   },
@@ -50,7 +50,7 @@ const styles: Record<string, React.CSSProperties> = {
   hint: { fontSize: 12, color: colors.textMuted, marginTop: 8 },
 
   // Info text
-  infoText: { textAlign: 'center', margin: '10px 0 16px', fontSize: 13, fontWeight: 700, color: colors.accent },
+  infoText: { textAlign: 'center', margin: '10px 0 16px', fontSize: 13, fontWeight: 700, color: colors.text },
 
   // Icons
   iconBtn: {
@@ -215,7 +215,7 @@ const MiningCard: React.FC<Props> = ({
           {/* Form (perfectly aligned) */}
           <div className="lxr-panel" style={styles.formGrid}>
             {/* Row 1: labels */}
-            <label htmlFor="lxr-qty" style={styles.label}>Quantity (USD)</label>
+            <label htmlFor="lxr-qty" style={styles.label}>Quantity (USDT)</label>
             <div aria-hidden="true" style={styles.labelPlaceholder}>Buy</div>
 
             {/* Row 2: controls */}
@@ -231,7 +231,7 @@ const MiningCard: React.FC<Props> = ({
               onChange={(e) => handleChange(e.target.value)}
               onKeyDown={preventDecimalKeys}
               onPaste={handlePaste}
-              onWheel={(e) => e.currentTarget.blur()} // prevent accidental wheel changes
+              onWheel={(e) => e.currentTarget.blur()}
               style={styles.input}
             />
             <button
