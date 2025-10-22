@@ -15,12 +15,12 @@ import NoticeCarousel from '../components/NoticeCarousel'
 // Connected components
 import Surface from '../components/common/Surface'
 import BottomNav from '../components/common/BottomNav'
-import BalanceCard from '../components/user/BalanceCard'            // On-chain $ balance + payout (with its own modal)
-import CoinBalanceCard from '../components/user/CoinBalanceCard'     // Off-chain coin balance + disabled withdraw
-import MiningCard from '../components/mining/MiningCard'             // One-click miner buy
+import BalanceCard from '../components/user/BalanceCard'
+import CoinBalanceCard from '../components/user/CoinBalanceCard'
+import MiningCard from '../components/mining/MiningCard'
 import MinerHistoryModal from '../components/mining/MinerHistoryModal'
-import StatsAndLoginCard from '../components/user/StatsAndLoginCard' // Daily login + referrals
-import ShareCard from '../components/user/ShareCard'                 // Referral code/link copy
+import StatsAndLoginCard from '../components/user/StatsAndLoginCard'
+import ShareCard from '../components/user/ShareCard'
 
 type OnChainData = {
   userBalance: string
@@ -53,13 +53,11 @@ const styles: Record<string, React.CSSProperties> = {
   grid: { display: 'grid', gridTemplateColumns: '1fr', gap: 12, alignItems: 'stretch' },
   cardShell: { background: 'transparent', border: 'none', padding: 0 },
 
-  // Simple modal styles used in CoinInfoModal content
   table: { width: '100%', borderCollapse: 'collapse' as const, color: colors.text },
   th: { textAlign: 'left' as const, padding: '8px 10px', borderBottom: `1px solid ${colors.grayLine}`, fontWeight: 900, fontSize: 13 },
   td: { padding: '8px 10px', borderBottom: `1px solid ${colors.grayLine}`, fontSize: 13 },
 }
 
-// Cookie helpers (persist tab)
 const setTabCookie = (value: 'home' | 'mining') => {
   try {
     const v = encodeURIComponent(value)
@@ -83,7 +81,6 @@ const Dashboard: React.FC = () => {
   const { account, userId, disconnect } = useWallet()
   const queryClient = useQueryClient()
 
-  // Top bar dropdown (light)
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
@@ -95,11 +92,9 @@ const Dashboard: React.FC = () => {
     }
   }, [])
 
-  // Tabs (persist in cookie)
   const [activeTab, setActiveTab] = useState<'home' | 'mining'>(getTabCookie())
   useEffect(() => { setTabCookie(activeTab) }, [activeTab])
 
-  // On-chain quick reads (for BalanceCard)
   const { data: onChainData } = useQuery<OnChainData | null>({
     queryKey: ['onChainData', account],
     enabled: isValidAddress(account),
@@ -114,7 +109,6 @@ const Dashboard: React.FC = () => {
     },
   })
 
-  // Off-chain stats (for CoinBalanceCard)
   const { data: stats } = useQuery<StatsResponse | null>({
     queryKey: ['stats-lite', account],
     enabled: isValidAddress(account),
@@ -127,7 +121,6 @@ const Dashboard: React.FC = () => {
     },
   })
 
-  // Proactive ensure off-chain profile if on-chain already registered
   useEffect(() => {
     if (!isValidAddress(account)) return
     const run = async () => {
@@ -152,11 +145,9 @@ const Dashboard: React.FC = () => {
     run()
   }, [account, queryClient])
 
-  // Miner history modal
   const [showHistory, setShowHistory] = useState(false)
-
-  // Coin info modal (detailed)
   const [showCoinInfo, setShowCoinInfo] = useState(false)
+
   const CoinInfoModal = () => {
     if (!showCoinInfo) return null
     return (
@@ -213,21 +204,17 @@ const Dashboard: React.FC = () => {
     )
   }
 
-  // Home tab
   const renderHome = () => (
     <div style={styles.grid}>
-      {/* On-chain $ balance + payout (modal handled inside component) */}
       <BalanceCard
         balanceLabel={`$${safeMoney(onChainData?.userBalance)}`}
         hasFundCode={!!onChainData?.hasFundCode}
       />
 
-      {/* Notice slider */}
       <div style={styles.cardShell}>
         <NoticeCarousel autoIntervalMs={5000} limit={10} />
       </div>
 
-      {/* Referral share card */}
       <ShareCard
         referralCode={(userId || '').toUpperCase()}
         referralLink={`${window.location.origin}/register?ref=${(userId || '').toUpperCase()}`}
@@ -235,22 +222,19 @@ const Dashboard: React.FC = () => {
     </div>
   )
 
-  // Mining tab (all cards remain; MiningCard not overlayed on any other card)
   const renderMining = () => (
     <div style={styles.grid}>
-      {/* Off-chain coin balance + disabled withdraw; info opens detailed modal */}
       <div style={styles.cardShell}>
         <CoinBalanceCard coinBalance={Number(stats?.coin_balance ?? 0)} onInfo={() => setShowCoinInfo(true)} />
       </div>
 
-      {/* Mining card — direct (no Surface wrapper) */}
+      {/* Info বাটন এখন MiningCard-এর ভেতরেই আছে; এখানে আলাদা কিছু দরকার নেই */}
       <div style={styles.cardShell}>
         <MiningCard
           account={account}
           minAmount={5}
-          defaultAmount={'5.00'}
+          onInfo={() => setShowCoinInfo(true)}
           onAfterPurchase={async () => {
-            // Refresh dashboards after buy
             queryClient.invalidateQueries({ queryKey: ['onChainData', account] })
             queryClient.invalidateQueries({ queryKey: ['stats-lite', account] })
           }}
@@ -258,7 +242,6 @@ const Dashboard: React.FC = () => {
         />
       </div>
 
-      {/* Your stats + daily login */}
       <div style={styles.cardShell}>
         <StatsAndLoginCard account={account} />
       </div>
@@ -269,12 +252,10 @@ const Dashboard: React.FC = () => {
 
   return (
     <div style={styles.page}>
-      {/* Modals */}
       <CoinInfoModal />
       <MinerHistoryModal open={showHistory} account={account} onClose={() => setShowHistory(false)} />
 
       <div style={styles.container}>
-        {/* Top bar */}
         <div style={styles.topBar}>
           <div className="lxr-lexori-logo" style={styles.brand as any}>Web3 Community</div>
           <div style={styles.userMenuWrap} ref={menuRef}>
@@ -301,11 +282,9 @@ const Dashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* Tabs */}
         {activeTab === 'home' ? renderHome() : renderMining()}
       </div>
 
-      {/* Bottom nav */}
       <BottomNav
         items={[
           {
