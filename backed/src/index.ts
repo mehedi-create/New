@@ -1,4 +1,3 @@
-// backend/src/index.ts
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { ethers, JsonRpcProvider, Contract, Interface } from 'ethers'
@@ -57,6 +56,7 @@ async function ensureSchema(db: D1Database) {
       coin_balance INTEGER DEFAULT 0,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     )`,
+    `CREATE INDEX IF NOT EXISTS idx_users_referrer_id ON users(referrer_id)`,
     `CREATE TABLE IF NOT EXISTS logins (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       wallet_address TEXT NOT NULL,
@@ -102,11 +102,10 @@ async function ensureSchema(db: D1Database) {
       admin TEXT NOT NULL,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     )`,
-    // New index to make referral count fast
-    `CREATE INDEX IF NOT EXISTS idx_users_referrer_id ON users(referrer_id)`
   ]
   await db.batch(stmts.map((sql) => db.prepare(sql)))
 
+  // Safe migrations for older DBs
   try { await db.prepare(`ALTER TABLE users ADD COLUMN coin_balance INTEGER DEFAULT 0`).run() } catch {}
   try { await db.prepare(`ALTER TABLE notices ADD COLUMN kind TEXT DEFAULT 'text'`).run() } catch {}
   try { await db.prepare(`ALTER TABLE notices ADD COLUMN expires_at TEXT`).run() } catch {}
@@ -125,7 +124,6 @@ const PLATFORM_ABI = [
   'function owner() view returns (address)',
   'function usdtToken() view returns (address)',
   'event MinerPurchased(address indexed user, uint256 amount, uint256 startTime, uint256 endTime)',
-  // Include a common variant of UserRegistered; parsing is handled flexibly below
   'event UserRegistered(address indexed user, string userId, address indexed referrer)',
 ]
 const ERC20_ABI = ['function decimals() view returns (uint8)']
@@ -318,6 +316,84 @@ async function creditMiningIfDue(db: D1Database, walletLower: string, env?: Bind
   return { credited_coins: totalCoinDelta }
 }
 
+// ---------- Additional helpers for reconcile ----------
+const BLOCKS_PER_DAY = 28800
+function addressTopic(addr: string) {
+  const a = ethers.getAddress(addr).toLowerCase().replace('0x', '')
+  return '0x' + '0'.repeat(24) + a
+}
+
+/** Import missing MinerPurchased logs for a wallet within lookbackDays. */
+async function importMinerPurchasesFromLogs(env: Bindings, walletLower: string, lookbackDays = 180) {
+  const provider = getProvider(env)
+  const latest = await provider.getBlockNumber()
+  const days = Math.max(1, Math.min(lookbackDays, 365))
+  const fromBlock = Math.max(0, latest - days * BLOCKS_PER_DAY)
+  const toBlock = latest
+  const contractAddr = ethers.getAddress(env.CONTRACT_ADDRESS)
+  const topicUser = addressTopic(walletLower)
+
+  const logs = await provider.getLogs({
+    address: contractAddr,
+    fromBlock,
+    toBlock,
+    topics: [MINER_PURCHASED_TOPIC, topicUser],
+  })
+
+  let added = 0
+  for (const lg of logs) {
+    const txh = lg.transactionHash
+    const exists = await env.DB.prepare('SELECT 1 FROM mining_purchases WHERE tx_hash = ?').bind(txh).first()
+    if (exists) continue
+    let parsed: any
+    try { parsed = IFACE.parseLog({ topics: lg.topics, data: lg.data }) } catch { continue }
+    const userAddr = ethers.getAddress(parsed.args.user as string)
+    if (userAddr.toLowerCase() !== walletLower) continue
+
+    const amountRaw = BigInt(parsed.args.amount.toString())
+    const startTime = Number(parsed.args.startTime)
+    const dailyCoins = await computeDailyCoins(env, amountRaw)
+    const startDate = isoDateFromUnix(startTime)
+
+    await env.DB.prepare(
+      `INSERT INTO mining_purchases (wallet_address, tx_hash, daily_coins, total_days, credited_days, start_date)
+       VALUES (?, ?, ?, 30, 0, ?)`
+    ).bind(walletLower, txh, Math.max(0, dailyCoins), startDate).run()
+    added++
+  }
+  return { added }
+}
+
+/** Normalize daily_coins for all miners of a wallet (if weird). */
+async function normalizeMinersForWallet(env: Bindings, walletLower: string) {
+  const res = await env.DB
+    .prepare('SELECT id, tx_hash, daily_coins FROM mining_purchases WHERE wallet_address = ?')
+    .bind(walletLower)
+    .all<{ id: number; tx_hash: string; daily_coins: number }>()
+  const rows = res.results || []
+  let corrected = 0
+  for (const r of rows) {
+    const before = Number(r.daily_coins || 0)
+    const after = await normalizePurchaseRowIfNeeded(env, r)
+    if (Number(after) !== before) corrected++
+  }
+  return { corrected }
+}
+
+/** Compute expected coin balance = logins + referral_rewards + mined + admin_adjustments */
+async function computeExpectedBalanceForUser(db: D1Database, walletLower: string, uidUpper: string) {
+  const loginRow = await db.prepare('SELECT COUNT(*) AS cnt FROM logins WHERE wallet_address = ?').bind(walletLower).first<{ cnt: number }>()
+  const refSum = await db.prepare('SELECT SUM(reward_coins) AS sum FROM referral_rewards WHERE referrer_id = ?').bind(uidUpper).first<{ sum: number }>()
+  const mined = await db.prepare('SELECT SUM(daily_coins * credited_days) AS sum FROM mining_purchases WHERE wallet_address = ?').bind(walletLower).first<{ sum: number }>()
+  const adminAdj = await db.prepare('SELECT SUM(delta) AS sum FROM admin_coin_audit WHERE wallet_address = ?').bind(walletLower).first<{ sum: number }>()
+  const total =
+    Math.max(0, Number(loginRow?.cnt || 0)) +
+    Math.max(0, Number(refSum?.sum || 0)) +
+    Math.max(0, Number(mined?.sum || 0)) +
+    Math.max(0, Number(adminAdj?.sum || 0))
+  return { expected: total }
+}
+
 // ---------- Debug ----------
 app.get('/api/debug/rpc', async (c) => {
   try {
@@ -334,7 +410,7 @@ app.get('/api/debug/rpc', async (c) => {
 // Health
 app.get('/api/health', (c) => c.json({ ok: true, time: Date.now() }))
 
-// Upsert user (signed) — referral bonus (kept for backward compat; register-lite is preferred)
+// Upsert user (signed) — referral bonus
 app.post('/api/users/upsert-from-chain', async (c) => {
   const cleanup = (key: string) => { inflightUpsert.delete(key); lastUpsertAt.set(key, Date.now()) }
   try {
@@ -385,7 +461,7 @@ app.post('/api/users/upsert-from-chain', async (c) => {
   }
 })
 
-// NEW: Register-lite (no signature; only tx_hash) — parse UserRegistered event and sync DB
+// Register-lite (no signature; parse tx)
 app.post('/api/users/register-lite', async (c) => {
   try {
     const body = await c.req.json<{ tx_hash: string }>()
@@ -400,11 +476,9 @@ app.post('/api/users/register-lite', async (c) => {
     const logs = (receipt.logs || []).filter((lg: any) => lg.address && ethers.getAddress(lg.address) === contractAddr)
 
     let userAddr: string | null = null
-    // Try topic pre-filter
     for (const lg of logs) {
       if (!lg.topics || !lg.topics.length) continue
       if (!REG_TOPICS.includes(lg.topics[0])) continue
-      // Try all register interfaces
       for (const I of REG_IFACES) {
         try {
           const parsed = I.parseLog({ topics: lg.topics, data: lg.data })
@@ -414,7 +488,6 @@ app.post('/api/users/register-lite', async (c) => {
       }
       if (userAddr) break
     }
-    // Fallback: try parse with all I on all logs from contract (even if topic didn't match list)
     if (!userAddr) {
       for (const lg of logs) {
         for (const I of REG_IFACES) {
@@ -433,13 +506,11 @@ app.post('/api/users/register-lite', async (c) => {
     const lower = userAddr.toLowerCase()
     const existed = await c.env.DB.prepare('SELECT 1 FROM users WHERE wallet_address = ?').bind(lower).first()
 
-    // Always read on-chain profile to get canonical userId/referrerId
     const profile = await getChainProfile(c.env, userAddr)
     if (!profile) return c.json({ error: 'Address not registered on-chain' }, 400)
 
     await upsertDbUser(c.env.DB, { walletAddress: userAddr, userId: profile.userId, referrerId: profile.referrerId || '' })
 
-    // Referral bonus if first time
     let referralBonus = { awarded: false, referrer: '' as string }
     if (!existed && profile.referrerAddr && profile.referrerAddr !== ethers.ZeroAddress) {
       const refLower = profile.referrerAddr.toLowerCase()
@@ -522,7 +593,7 @@ app.post('/api/mining/record-purchase', async (c) => {
   }
 })
 
-// Record mining purchase (LITE — no signature; only tx_hash)
+// Record mining purchase (LITE — only tx_hash)
 app.post('/api/mining/record-purchase-lite', async (c) => {
   try {
     const body = await c.req.json<{ tx_hash: string }>()
@@ -601,7 +672,6 @@ app.get('/api/stats/:address', async (c) => {
         today_date: today,
         next_reset_utc_ms: Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate() + 1, 0, 0, 0, 0)
       },
-      // New: DB-based referral count (L1). UI-তে "Total Refer" হিসেবে দেখাতে পারেন।
       referrals: { l1_count: l1Count }
     })
   } catch (e: any) {
@@ -725,7 +795,6 @@ Timestamp: ${Number(timestamp)}`
     await verifySignedMessage(address, msg, signature)
     await requireOwner(c.env, address)
 
-    // Build dynamic update
     const fields: string[] = []
     const values: any[] = []
 
@@ -903,7 +972,7 @@ Timestamp: ${Number(timestamp)}`
   }
 })
 
-// ---------- Admin tools: miner add/remove (NEW) ----------
+// ---------- Admin tools: miner add/remove ----------
 app.post('/api/admin/miner-add', async (c) => {
   try {
     const body = await c.req.json<{
@@ -943,9 +1012,7 @@ Timestamp: ${Number(timestamp)}`
        VALUES (?, ?, ?, ?, 0, ?)`
     ).bind(lower, (tx_hash || ''), daily, days, start).run()
 
-    // Catch-up immediately
     const res = await creditMiningIfDue(c.env.DB, lower, c.env)
-
     return c.json({ ok: true, wallet: lower, daily_coins: daily, total_days: days, start_date: start, credited_now: res.credited_coins || 0 })
   } catch (e: any) {
     console.error('POST /api/admin/miner-add error:', e?.stack || e?.message || e)
@@ -984,17 +1051,109 @@ Timestamp: ${Number(timestamp)}`
 
     const credited = Math.max(0, Number(row.daily_coins || 0)) * Math.max(0, Number(row.credited_days || 0))
     if (credited > 0) {
-      // deduct from user balance (bound to 0 minimal)
       const cur = await c.env.DB.prepare('SELECT coin_balance FROM users WHERE wallet_address = ?').bind(lower).first<{ coin_balance: number }>()
       const newBal = Math.max(0, Number(cur?.coin_balance || 0) - credited)
       await c.env.DB.prepare('UPDATE users SET coin_balance = ? WHERE wallet_address = ?').bind(newBal, lower).run()
     }
 
     await c.env.DB.prepare('DELETE FROM mining_purchases WHERE id = ?').bind(Number(row.id)).run()
-
     return c.json({ ok: true, deducted: credited })
   } catch (e: any) {
     console.error('POST /api/admin/miner-remove error:', e?.stack || e?.message || e)
+    return c.json({ error: 'Server error' }, 500)
+  }
+})
+
+// ---------- Admin tools: reconcile selected user (Auto Fix) ----------
+app.post('/api/admin/reconcile-user', async (c) => {
+  try {
+    const body = await c.req.json<{
+      address: string
+      timestamp: number
+      signature: string
+      user_id?: string
+      wallet?: string
+      lookback_days?: number
+    }>()
+    const { address, timestamp, signature, user_id, wallet } = body || ({} as any)
+    const lookback_days = Math.max(1, Math.min(Number(body?.lookback_days || 180), 365))
+
+    if (!ethers.isAddress(address)) return c.json({ error: 'Invalid admin address' }, 400)
+    if (!timestamp || !signature) return c.json({ error: 'Missing auth' }, 400)
+
+    const msg = `Admin action authorization
+Purpose: reconcile_user
+Address: ${ethers.getAddress(address)}
+Timestamp: ${Number(timestamp)}`
+    await verifySignedMessage(address, msg, signature)
+    await requireOwner(c.env, address)
+
+    // Resolve target user
+    let row: any = null
+    if (wallet && ethers.isAddress(wallet)) {
+      row = await c.env.DB
+        .prepare('SELECT user_id, wallet_address, coin_balance FROM users WHERE wallet_address = ?')
+        .bind(wallet.toLowerCase())
+        .first()
+    } else if (user_id && typeof user_id === 'string' && user_id.trim()) {
+      row = await c.env.DB
+        .prepare('SELECT user_id, wallet_address, coin_balance FROM users WHERE user_id = ?')
+        .bind(user_id.toUpperCase())
+        .first()
+    } else {
+      return c.json({ error: 'user_id or wallet required' }, 400)
+    }
+
+    // Try ensure if not found and wallet provided
+    let ensured = false
+    let walletLower = ''
+    let uidUpper = ''
+    if (!row) {
+      if (!wallet || !ethers.isAddress(wallet)) return c.json({ error: 'User not found' }, 404)
+      const ok = await ensureUserInDb(c.env, wallet)
+      if (!ok) return c.json({ error: 'Address not registered on-chain' }, 400)
+      ensured = true
+      row = await c.env.DB
+        .prepare('SELECT user_id, wallet_address, coin_balance FROM users WHERE wallet_address = ?')
+        .bind(wallet.toLowerCase())
+        .first()
+      if (!row) return c.json({ error: 'User not found (db)' }, 404)
+    }
+    walletLower = String(row.wallet_address).toLowerCase()
+    uidUpper = String(row.user_id || '').toUpperCase()
+
+    // 1) Import missing miners
+    const imp = await importMinerPurchasesFromLogs(c.env, walletLower, lookback_days)
+
+    // 2) Normalize daily_coins if weird
+    const norm = await normalizeMinersForWallet(c.env, walletLower)
+
+    // 3) Apply due credits now
+    const credit = await creditMiningIfDue(c.env.DB, walletLower, c.env)
+
+    // 4) Recompute expected and set coin_balance
+    const prev = await c.env.DB.prepare('SELECT coin_balance FROM users WHERE wallet_address = ?').bind(walletLower).first<{ coin_balance: number }>()
+    const prevBal = Number(prev?.coin_balance || 0)
+    const comp = await computeExpectedBalanceForUser(c.env.DB, walletLower, uidUpper)
+    const expected = Math.max(0, Number(comp.expected || 0))
+
+    if (prevBal !== expected) {
+      await c.env.DB.prepare('UPDATE users SET coin_balance = ? WHERE wallet_address = ?').bind(expected, walletLower).run()
+    }
+
+    return c.json({
+      ok: true,
+      wallet: walletLower,
+      ensured,
+      added_miners: imp.added || 0,
+      corrected_daily: norm.corrected || 0,
+      credited_now: credit.credited_coins || 0,
+      prev_balance: prevBal,
+      expected_balance: expected,
+      new_balance: expected,
+    })
+  } catch (e: any) {
+    console.error('POST /api/admin/reconcile-user error:', e?.stack || e?.message || e)
     return c.json({ error: 'Server error' }, 500)
   }
 })
