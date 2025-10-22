@@ -7,10 +7,9 @@ import { config } from '../../config'
 import { showErrorToast, showSuccessToast } from '../../utils/notification'
 
 const colors = {
+  text: '#e8f9f1',
+  textMuted: 'rgba(232,249,241,0.75)',
   accent: '#14b8a6',
-  accent2: '#0ea5a5',
-  text: '#ffffff',       // all text white
-  textMuted: '#ffffff',  // muted text also white as requested
   grayLine: 'rgba(255,255,255,0.12)',
 }
 
@@ -23,34 +22,34 @@ const styles: Record<string, React.CSSProperties> = {
   headerTitle: { fontSize: 22, fontWeight: 900, letterSpacing: 1, color: colors.text },
   headerSub: { fontSize: 11, fontWeight: 700, letterSpacing: 1, color: colors.text },
 
-  // Controls
+  // Controls (aligned with grid)
   formGrid: {
     display: 'grid',
     gridTemplateColumns: '1fr 160px',   // Left: input, Right: button
-    gridTemplateRows: 'auto 48px',      // Row 1: labels, Row 2: controls (fixed height)
+    gridTemplateRows: 'auto 48px',      // Row 1: labels, Row 2: controls
     columnGap: 10,
     rowGap: 6,
     alignItems: 'center',
   },
-  label: { fontSize: 12, fontWeight: 800, color: colors.text },
-  labelPlaceholder: { fontSize: 12, fontWeight: 800, color: 'transparent', visibility: 'hidden' }, // keeps rows aligned
+  label: { fontSize: 12, fontWeight: 800, color: colors.accent },
+  labelPlaceholder: { fontSize: 12, fontWeight: 800, color: 'transparent', visibility: 'hidden' },
   input: {
-    height: 48, borderRadius: 12, border: '2px solid rgba(255,255,255,0.35)',
+    height: 48, borderRadius: 12, border: `2px solid ${colors.grayLine}`,
     padding: '0 12px', background: 'rgba(255,255,255,0.06)', outline: 'none',
     color: colors.text, fontSize: 15, width: '100%',
   },
   btnBuy: {
     height: 48, borderRadius: 12, padding: '0 18px', width: '100%',
-    background: 'linear-gradient(90deg, #14b8a6 0%, #34d399 100%)',
+    background: 'linear-gradient(90deg, #14b8a6 0%, #34d399 100%)', // keep as-is
     color: '#0b1b3b', border: 'none', fontSize: 15, fontWeight: 900, cursor: 'pointer',
     boxShadow: '0 6px 18px rgba(20,184,166,0.35)', transform: 'translateZ(0)',
     transition: 'transform .15s ease, box-shadow .15s ease, opacity .2s ease',
   },
   btnBuyHover: { transform: 'translateY(-1px)', boxShadow: '0 10px 26px rgba(20,184,166,0.45)' },
-  hint: { fontSize: 12, color: colors.textMuted, marginTop: 8 },
 
-  // Info text
+  // Info + hint
   infoText: { textAlign: 'center', margin: '10px 0 16px', fontSize: 13, fontWeight: 700, color: colors.text },
+  hint: { fontSize: 12, color: colors.textMuted, marginTop: 8 },
 
   // Icons
   iconBtn: {
@@ -59,7 +58,7 @@ const styles: Record<string, React.CSSProperties> = {
     border: `1px solid ${colors.grayLine}`, display: 'grid', placeItems: 'center',
     cursor: 'pointer', transition: 'box-shadow .15s ease, transform .15s ease',
   },
-  iconBtnHover: { boxShadow: '0 0 0 4px rgba(20,184,166,0.25)', transform: 'translateY(-1px)' },
+  iconBtnHover: { boxShadow: `0 0 0 4px rgba(20,184,166,0.25)`, transform: 'translateY(-1px)' },
 }
 
 const ERC20_ABI = ['function allowance(address owner, address spender) view returns (uint256)']
@@ -150,9 +149,9 @@ const MiningCard: React.FC<Props> = ({
     }
   }
 
-  // Sanitize input to allow digits only
+  // Sanitize to digits only
   const handleChange = (v: string) => {
-    const cleaned = v.replace(/\D/g, '') // keep only digits
+    const cleaned = v.replace(/\D/g, '')
     setAmount(cleaned)
   }
 
@@ -212,7 +211,7 @@ const MiningCard: React.FC<Props> = ({
             <br />Example: invest ${minAmount} USDT → {minAmount} coins/day × 30 days.
           </div>
 
-          {/* Form (perfectly aligned) */}
+          {/* Form (aligned) */}
           <div className="lxr-panel" style={styles.formGrid}>
             {/* Row 1: labels */}
             <label htmlFor="lxr-qty" style={styles.label}>Quantity (USDT)</label>
