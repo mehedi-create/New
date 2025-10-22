@@ -15,22 +15,18 @@ const colors = {
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  // Surface content wrapper keeps same spacing as other cards
-  content: { position: 'relative', zIndex: 2, padding: 12, color: colors.text },
+  // Surface-এর ভেতরের কনটেন্ট (অতিরিক্ত স্টাইল মিনিমাল, যাতে অন্য কার্ডের মতই লাগে)
+  content: { color: colors.text },
 
   // Header
-  header: {
-    display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10,
-  },
+  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
   headerTitle: { fontSize: 20, fontWeight: 900, letterSpacing: 1, color: colors.text },
   headerSub: { fontSize: 11, fontWeight: 700, letterSpacing: 1, color: colors.text },
 
   // Info
-  infoText: {
-    textAlign: 'center', margin: '8px 0 12px', fontSize: 13, fontWeight: 700, color: colors.text,
-  },
+  infoText: { textAlign: 'center', margin: '8px 0 12px', fontSize: 13, fontWeight: 700, color: colors.text },
 
-  // Inner panel (to match other cards’ inner sections)
+  // Inner panel (অন্য কার্ডের ইননার-সেকশনের মত)
   panelBox: {
     border: `1px solid ${colors.grayLine}`,
     background: 'rgba(255,255,255,0.06)',
@@ -38,7 +34,7 @@ const styles: Record<string, React.CSSProperties> = {
     padding: 10,
   },
 
-  // Controls grid (perfect alignment)
+  // Controls grid — নিখুঁত অ্যালাইনমেন্ট
   formGrid: {
     display: 'grid',
     gridTemplateColumns: '1fr 150px',
@@ -61,9 +57,10 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 15,
     width: '100%',
   },
+
   btnBuy: {
     height: 48, borderRadius: 12, padding: '0 18px', width: '100%',
-    background: 'linear-gradient(90deg, #14b8a6 0%, #34d399 100%)',
+    background: 'linear-gradient(90deg, #14b8a6 0%, #34d399 100%)', // বাটনের কালার আগের মতই
     color: '#0b1b3b', border: 'none', fontSize: 15, fontWeight: 900, cursor: 'pointer',
     boxShadow: '0 6px 18px rgba(20,184,166,0.35)', transform: 'translateZ(0)',
     transition: 'transform .15s ease, box-shadow .15s ease, opacity .2s ease',
@@ -71,7 +68,7 @@ const styles: Record<string, React.CSSProperties> = {
   btnBuyHover: { transform: 'translateY(-1px)', boxShadow: '0 10px 26px rgba(20,184,166,0.45)' },
   hint: { fontSize: 12, color: colors.textMuted, marginTop: 8 },
 
-  // Icon button (History)
+  // History icon button
   iconBtn: {
     height: 34, width: 34, borderRadius: '50%',
     background: 'rgba(255,255,255,0.06)', color: colors.text,
@@ -169,17 +166,15 @@ const MiningCard: React.FC<Props> = ({
     }
   }
 
-  // Sanitize to digits only
+  // Digits-only input
   const handleChange = (v: string) => {
     const cleaned = v.replace(/\D/g, '')
     setAmount(cleaned)
   }
-
   const preventDecimalKeys = (e: React.KeyboardEvent<HTMLInputElement>) => {
     const blocked = ['.', ',', 'e', 'E', '+', '-']
     if (blocked.includes(e.key)) e.preventDefault()
   }
-
   const handlePaste: React.ClipboardEventHandler<HTMLInputElement> = (e) => {
     e.preventDefault()
     const text = (e.clipboardData || (window as any).clipboardData).getData('text') || ''
@@ -196,10 +191,10 @@ const MiningCard: React.FC<Props> = ({
         note="Please approve the prompts in your wallet."
       />
 
-      {/* Use Surface to match other cards exactly */}
+      {/* Surface ব্যবহার করে অন্য কার্ডের মতই শেল */}
       <Surface>
         <div style={styles.content}>
-          {/* Header */}
+          {/* Header row */}
           <div style={styles.header}>
             <div>
               <div style={styles.headerTitle}>LEXORI</div>
@@ -219,20 +214,20 @@ const MiningCard: React.FC<Props> = ({
             )}
           </div>
 
-          {/* Info */}
+          {/* Short info */}
           <div style={styles.infoText}>
             Earn coins daily equal to your invested USDT, for 30 days.
             <br />Example: invest ${minAmount} USDT → {minAmount} coins/day × 30 days.
           </div>
 
-          {/* Inner panel like other cards */}
+          {/* Inner panel: input + button */}
           <div style={styles.panelBox}>
             <div style={styles.formGrid}>
-              {/* Row 1: labels */}
+              {/* labels */}
               <label htmlFor="lxr-qty" style={styles.label}>Quantity (USDT)</label>
               <div aria-hidden="true" style={styles.labelPlaceholder}>Buy</div>
 
-              {/* Row 2: controls */}
+              {/* controls */}
               <input
                 id="lxr-qty"
                 type="number"
