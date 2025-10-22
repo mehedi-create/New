@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import Surface from '../common/Surface'
 import { signAuthMessage } from '../../utils/contract'
 import { getStats, markLogin, upsertUserFromChain, type StatsResponse } from '../../services/api'
@@ -35,22 +35,15 @@ type Props = {
 }
 
 const StatsAndLoginCard: React.FC<Props> = ({ account }) => {
-  // Off-chain stats (DB-driven)
-  const { data: stats, isLoading: isStatsLoading, refetch: refetchStats } = useQuery<StatsResponse | null>({
+  // Off-chain stats (DB-based; includes Total Refer)
+  const { data: stats, refetch: refetchStats, isLoading: isStatsLoading } = useQuery<StatsResponse | null>({
     queryKey: ['stats-lite', account],
     enabled: isValidAddress(account),
-    retry: false,
-    refetchOnWindowFocus: false,
-    refetchInterval: 60000,
+    retry: false, refetchOnWindowFocus: false, refetchInterval: 60000,
     queryFn: async () => {
       if (!isValidAddress(account)) return null
-      try {
-        const res = await getStats(account!)
-        return res.data
-      } catch (err: any) {
-        const status = err?.response?.status || err?.status
-        if (status === 404) return null
-        throw err
+      try { const res = await getStats(account!); return res.data } catch (err: any) {
+        const status = err?.response?.status || err?.status; if (status === 404) return null; throw err
       }
     },
   })
@@ -124,20 +117,19 @@ const StatsAndLoginCard: React.FC<Props> = ({ account }) => {
     }
   }
 
-  const totalReferrals = stats?.referrals?.l1_count ?? 0
-  const totalLoginDays = stats?.logins?.total_login_days ?? 0
-
   return (
     <Surface>
       <h3 style={styles.cardTitle}>Your Stats</h3>
       <div style={styles.grid2}>
         <div style={styles.statBox}>
           <div style={styles.statLabel}>Total Refer</div>
-          <div style={styles.statValue}>{isStatsLoading ? '...' : totalReferrals}</div>
+          <div style={styles.statValue}>
+            {isStatsLoading ? '...' : (stats?.referrals?.l1_count ?? 0)}
+          </div>
         </div>
         <div style={styles.statBox}>
           <div style={styles.statLabel}>Total Login (days)</div>
-          <div style={styles.statValue}>{isStatsLoading ? '...' : totalLoginDays}</div>
+          <div style={styles.statValue}>{stats?.logins?.total_login_days ?? 0}</div>
         </div>
       </div>
 
