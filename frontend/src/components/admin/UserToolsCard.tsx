@@ -13,15 +13,16 @@ const colors = {
 }
 
 const styles: Record<string, React.CSSProperties> = {
+  row: { display: 'grid', gridTemplateColumns: '1fr auto', gap: 8, alignItems: 'center' },
   input: {
     height: 40, borderRadius: 10, border: '2px solid rgba(20,184,166,0.3)',
-    padding: '0 10px', background: 'rgba(255,255,255,0.05)', outline: 'none', color: colors.text, fontSize: 14, width: '100%',
+    padding: '0 10px', background: 'rgba(255,255,255,0.05)', outline: 'none',
+    color: colors.text, fontSize: 14, width: '100%',
   },
-  row: { display: 'grid', gridTemplateColumns: '1fr auto', gap: 8, alignItems: 'center' },
   small: { fontSize: 12, color: colors.textMuted },
   uidBtn: {
-    border: 'none', background: 'transparent', color: colors.accent, fontWeight: 900, cursor: 'pointer',
-    textDecoration: 'underline', padding: 0, fontSize: 14,
+    border: 'none', background: 'transparent', color: colors.accent,
+    fontWeight: 900, cursor: 'pointer', textDecoration: 'underline', padding: 0, fontSize: 14,
   },
 }
 
@@ -45,16 +46,11 @@ type Props = {
 
 const UserToolsCard: React.FC<Props> = ({ allow, adminAddress }) => {
   const [query, setQuery] = useState('')
-  const canSearch = useMemo(() => {
-    const q = query.trim()
-    return q.length >= 4 // ছোট ইউআইডি/টাইপো ফিল্টার
-  }, [query])
-
   const [loading, setLoading] = useState(false)
   const [found, setFound] = useState<AdminUserInfo['user'] | null>(null)
-
-  // Details modal state
   const [openDetail, setOpenDetail] = useState(false)
+
+  const canSearch = useMemo(() => query.trim().length >= 4, [query])
 
   const onSearch = async () => {
     if (!allow) { showErrorToast('Not allowed'); return }
@@ -87,7 +83,6 @@ const UserToolsCard: React.FC<Props> = ({ allow, adminAddress }) => {
     <>
       <Surface title="User Tools" sub="Search by UID or Wallet">
         <div style={{ display: 'grid', gap: 10 }}>
-          {/* Single search input */}
           <div style={styles.row}>
             <input
               style={styles.input}
@@ -96,13 +91,15 @@ const UserToolsCard: React.FC<Props> = ({ allow, adminAddress }) => {
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') onSearch() }}
             />
-            <button className="lxr-buy-btn" onClick={onSearch} disabled={!allow || loading || !adminAddress || !canSearch}>
+            <button
+              className="lxr-buy-btn"
+              onClick={onSearch}
+              disabled={!allow || loading || !adminAddress || !canSearch}
+            >
               {loading ? 'SEARCHING...' : 'Search'}
             </button>
           </div>
-          <div style={styles.small}>Tip: You can paste a wallet or type a user ID. Click result UID to open full details.</div>
 
-          {/* Result preview */}
           {!found ? (
             <div style={styles.small}>No user selected</div>
           ) : (
@@ -121,13 +118,11 @@ const UserToolsCard: React.FC<Props> = ({ allow, adminAddress }) => {
         </div>
       </Surface>
 
-      {/* Details modal */}
       <UserDetailModal
         open={openDetail}
         onClose={() => setOpenDetail(false)}
         adminAddress={adminAddress}
         allow={allow}
-        // Pass either wallet or uid; modal will refresh itself
         initialUser={found || undefined}
       />
     </>
