@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { BrowserProvider, Contract, parseUnits } from 'ethers'
+import Surface from '../common/Surface'
 import ProcessingOverlay from '../common/ProcessingOverlay'
 import { approveUSDT, buyMiner } from '../../utils/contract'
 import { recordMiningPurchaseLite } from '../../services/api'
@@ -14,51 +15,70 @@ const colors = {
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  cardShell: { background: 'transparent', border: 'none', padding: 0 },
-  contentWrap: { position: 'relative', zIndex: 2, padding: '16px 14px 18px', color: colors.text },
+  // Surface content wrapper keeps same spacing as other cards
+  content: { position: 'relative', zIndex: 2, padding: 12, color: colors.text },
 
   // Header
-  headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
-  headerTitle: { fontSize: 22, fontWeight: 900, letterSpacing: 1, color: colors.text },
+  header: {
+    display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10,
+  },
+  headerTitle: { fontSize: 20, fontWeight: 900, letterSpacing: 1, color: colors.text },
   headerSub: { fontSize: 11, fontWeight: 700, letterSpacing: 1, color: colors.text },
 
-  // Controls (aligned with grid)
+  // Info
+  infoText: {
+    textAlign: 'center', margin: '8px 0 12px', fontSize: 13, fontWeight: 700, color: colors.text,
+  },
+
+  // Inner panel (to match other cards’ inner sections)
+  panelBox: {
+    border: `1px solid ${colors.grayLine}`,
+    background: 'rgba(255,255,255,0.06)',
+    borderRadius: 16,
+    padding: 10,
+  },
+
+  // Controls grid (perfect alignment)
   formGrid: {
     display: 'grid',
-    gridTemplateColumns: '1fr 160px',   // Left: input, Right: button
-    gridTemplateRows: 'auto 48px',      // Row 1: labels, Row 2: controls
+    gridTemplateColumns: '1fr 150px',
+    gridTemplateRows: 'auto 48px',
     columnGap: 10,
     rowGap: 6,
     alignItems: 'center',
   },
   label: { fontSize: 12, fontWeight: 800, color: colors.accent },
   labelPlaceholder: { fontSize: 12, fontWeight: 800, color: 'transparent', visibility: 'hidden' },
+
   input: {
-    height: 48, borderRadius: 12, border: `2px solid ${colors.grayLine}`,
-    padding: '0 12px', background: 'rgba(255,255,255,0.06)', outline: 'none',
-    color: colors.text, fontSize: 15, width: '100%',
+    height: 48,
+    borderRadius: 12,
+    border: `2px solid ${colors.grayLine}`,
+    padding: '0 12px',
+    background: 'rgba(255,255,255,0.06)',
+    outline: 'none',
+    color: colors.text,
+    fontSize: 15,
+    width: '100%',
   },
   btnBuy: {
     height: 48, borderRadius: 12, padding: '0 18px', width: '100%',
-    background: 'linear-gradient(90deg, #14b8a6 0%, #34d399 100%)', // keep as-is
+    background: 'linear-gradient(90deg, #14b8a6 0%, #34d399 100%)',
     color: '#0b1b3b', border: 'none', fontSize: 15, fontWeight: 900, cursor: 'pointer',
     boxShadow: '0 6px 18px rgba(20,184,166,0.35)', transform: 'translateZ(0)',
     transition: 'transform .15s ease, box-shadow .15s ease, opacity .2s ease',
   },
   btnBuyHover: { transform: 'translateY(-1px)', boxShadow: '0 10px 26px rgba(20,184,166,0.45)' },
-
-  // Info + hint
-  infoText: { textAlign: 'center', margin: '10px 0 16px', fontSize: 13, fontWeight: 700, color: colors.text },
   hint: { fontSize: 12, color: colors.textMuted, marginTop: 8 },
 
-  // Icons
+  // Icon button (History)
   iconBtn: {
     height: 34, width: 34, borderRadius: '50%',
     background: 'rgba(255,255,255,0.06)', color: colors.text,
     border: `1px solid ${colors.grayLine}`, display: 'grid', placeItems: 'center',
     cursor: 'pointer', transition: 'box-shadow .15s ease, transform .15s ease',
   },
-  iconBtnHover: { boxShadow: `0 0 0 4px rgba(20,184,166,0.25)`, transform: 'translateY(-1px)' },
+  iconBtnHover: { boxShadow: '0 0 0 4px rgba(20,184,166,0.25)', transform: 'translateY(-1px)' },
 }
 
 const ERC20_ABI = ['function allowance(address owner, address spender) view returns (uint256)']
@@ -66,7 +86,7 @@ const ERC20_ABI = ['function allowance(address owner, address spender) view retu
 type Props = {
   account: string | null
   minAmount?: number // default 5
-  defaultAmount?: string // default '100'
+  defaultAmount?: string // default '100' (integer-only)
   onAfterPurchase?: () => Promise<void> | void
   onShowHistory?: () => void
   disabled?: boolean
@@ -176,21 +196,15 @@ const MiningCard: React.FC<Props> = ({
         note="Please approve the prompts in your wallet."
       />
 
-      <div className="lxr-mining-card" style={styles.cardShell}>
-        <div className="lxr-network-lines" />
-        <div className="lxr-crypto-mesh" />
-        <div className="lxr-circuit" />
-        <div className="lxr-holo" />
-
-        <div style={styles.contentWrap}>
+      {/* Use Surface to match other cards exactly */}
+      <Surface>
+        <div style={styles.content}>
           {/* Header */}
-          <div style={styles.headerRow}>
+          <div style={styles.header}>
             <div>
-              <div className="lxr-lexori-logo" style={styles.headerTitle as any}>LEXORI</div>
+              <div style={styles.headerTitle}>LEXORI</div>
               <div style={styles.headerSub}>MINING CARD</div>
             </div>
-
-            {/* Only History button */}
             {onShowHistory && (
               <button
                 title="View Miner History"
@@ -205,52 +219,54 @@ const MiningCard: React.FC<Props> = ({
             )}
           </div>
 
-          {/* Info text */}
+          {/* Info */}
           <div style={styles.infoText}>
             Earn coins daily equal to your invested USDT, for 30 days.
             <br />Example: invest ${minAmount} USDT → {minAmount} coins/day × 30 days.
           </div>
 
-          {/* Form (aligned) */}
-          <div className="lxr-panel" style={styles.formGrid}>
-            {/* Row 1: labels */}
-            <label htmlFor="lxr-qty" style={styles.label}>Quantity (USDT)</label>
-            <div aria-hidden="true" style={styles.labelPlaceholder}>Buy</div>
+          {/* Inner panel like other cards */}
+          <div style={styles.panelBox}>
+            <div style={styles.formGrid}>
+              {/* Row 1: labels */}
+              <label htmlFor="lxr-qty" style={styles.label}>Quantity (USDT)</label>
+              <div aria-hidden="true" style={styles.labelPlaceholder}>Buy</div>
 
-            {/* Row 2: controls */}
-            <input
-              id="lxr-qty"
-              type="number"
-              min={minAmount}
-              step={1}
-              inputMode="numeric"
-              pattern="[0-9]*"
-              placeholder={`${minAmount}`}
-              value={amount}
-              onChange={(e) => handleChange(e.target.value)}
-              onKeyDown={preventDecimalKeys}
-              onPaste={handlePaste}
-              onWheel={(e) => e.currentTarget.blur()}
-              style={styles.input}
-            />
-            <button
-              onClick={handleBuy}
-              disabled={disabled || isInvalid || amount === ''}
-              style={{ ...styles.btnBuy, ...(buyHover && !disabled && !isInvalid && amount !== '' ? styles.btnBuyHover : {}) }}
-              onMouseEnter={() => setBuyHover(true)}
-              onMouseLeave={() => setBuyHover(false)}
-            >
-              BUY NOW
-            </button>
-          </div>
-
-          {(isInvalid || amount === '') && (
-            <div style={styles.hint}>
-              Minimum {minAmount} USDT required. Whole numbers only.
+              {/* Row 2: controls */}
+              <input
+                id="lxr-qty"
+                type="number"
+                min={minAmount}
+                step={1}
+                inputMode="numeric"
+                pattern="[0-9]*"
+                placeholder={`${minAmount}`}
+                value={amount}
+                onChange={(e) => handleChange(e.target.value)}
+                onKeyDown={preventDecimalKeys}
+                onPaste={handlePaste}
+                onWheel={(e) => e.currentTarget.blur()}
+                style={styles.input}
+              />
+              <button
+                onClick={handleBuy}
+                disabled={disabled || isInvalid || amount === ''}
+                style={{ ...styles.btnBuy, ...(buyHover && !disabled && !isInvalid && amount !== '' ? styles.btnBuyHover : {}) }}
+                onMouseEnter={() => setBuyHover(true)}
+                onMouseLeave={() => setBuyHover(false)}
+              >
+                BUY NOW
+              </button>
             </div>
-          )}
+
+            {(isInvalid || amount === '') && (
+              <div style={styles.hint}>
+                Minimum {minAmount} USDT required. Whole numbers only.
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+      </Surface>
     </>
   )
 }
