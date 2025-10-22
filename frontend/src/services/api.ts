@@ -28,10 +28,7 @@ export type StatsResponse = {
     today_date: string
     next_reset_utc_ms: number
   }
-  // New: DB-based referrals count (L1) — UI shows as "Total Refer"
-  referrals?: {
-    l1_count: number
-  }
+  referrals?: { l1_count: number }
 }
 
 export type LoginResponse = {
@@ -107,10 +104,11 @@ export type MiningHistoryItem = {
   days_left: number
 }
 
-// Admin tools: user info/adjust coins/miner add/remove
+// Admin tools: user info/adjust coins/miner add-remove
 export type AdminOverviewResponse = { ok: boolean; total_users: number; total_coins: number }
 export type AdminTopReferrer = { address: string; userId: string; count: number }
 
+// Updated user info shape (DB)
 export type AdminUserInfo = {
   ok: boolean
   user?: {
@@ -119,13 +117,20 @@ export type AdminUserInfo = {
     coin_balance: number
     logins: number
     referral_coins: number
-    mining: { purchases: number; mined_coins: number }
+    l1_count?: number
+    mining: {
+      purchases: number
+      mined_coins: number
+      adjustments?: number
+      mining_total?: number // mined_coins + adjustments
+    }
     created_at: string
   }
   error?: string
 }
 
 export type AdjustCoinsResponse = { ok: boolean; wallet: string; coin_balance: number; error?: string }
+
 export type AdminMinerAddResponse = {
   ok: boolean
   wallet: string
@@ -133,6 +138,7 @@ export type AdminMinerAddResponse = {
   total_days: number
   start_date: string
   credited_now: number
+  mode?: 'verify' | 'force'
 }
 export type AdminMinerRemoveResponse = { ok: boolean; deducted: number }
 
@@ -143,7 +149,7 @@ export type RegisterLiteResponse = {
   referral_bonus?: { awarded: boolean; referrer: string }
 }
 
-// --- Admin: reconcile user (auto-fix only selected user) ---
+// Admin: reconcile (auto-fix selected user)
 export type AdminReconcileResponse = {
   ok: boolean
   wallet: string
@@ -155,6 +161,31 @@ export type AdminReconcileResponse = {
   expected_balance?: number
   new_balance?: number
   error?: string
+}
+
+// Admin: per-miner fix
+export type AdminMinerFixResponse = {
+  ok: boolean
+  corrected_daily: number
+  credited_now: number
+  miner: {
+    id: number
+    tx_hash: string
+    daily_coins: number
+    start_date: string
+    total_days: number
+    credited_days: number
+  }
+}
+
+// Admin: mining coin edit (set-to)
+export type AdminMiningEditResponse = {
+  ok: boolean
+  wallet: string
+  prev_total: number
+  new_total: number
+  delta: number
+  unchanged?: boolean
 }
 
 // ---------------- Health ----------------
@@ -185,27 +216,6 @@ export const markLogin = (address: string, timestamp: number, signature: string)
   enqueueWrite(() =>
     api.post<LoginResponse>(`/api/users/${address}/login`, { timestamp, signature }, { timeout: 45000 })
   )
-
-// Smart helper (optional): ensure + login in one go
-export const markLoginSmart = async (address: string) => {
-  const { signAuthMessage } = await import('../utils/contract')
-  const { timestamp, signature } = await signAuthMessage(address)
-  try {
-    await markLogin(address, timestamp, signature)
-    return { ok: true }
-  } catch (e: any) {
-    const status = e?.response?.status || e?.status
-    if (status === 404) {
-      await upsertUserFromChain(address, timestamp, signature)
-      await markLogin(address, timestamp, signature)
-      return { ok: true }
-    }
-    if (status === 409) {
-      return { ok: true, already: true }
-    }
-    throw e
-  }
-}
 
 // ---------------- Mining (off-chain record) ----------------
 export const recordMiningPurchase = async (address: string, txHash: string) => {
@@ -282,12 +292,14 @@ export const adjustUserCoins = (payload: {
     api.post<AdjustCoinsResponse>('/api/admin/adjust-coins', payload, { timeout: 45000 })
   )
 
+// Updated: support mode 'verify' | 'force'
 export const adminMinerAdd = (payload: {
   address: string
   timestamp: number
   signature: string
   wallet: string
-  amount_usd: number
+  mode?: 'verify' | 'force'
+  amount_usd?: number
   start_date?: string
   total_days?: number
   tx_hash?: string
@@ -319,6 +331,32 @@ export const adminReconcileUser = (payload: {
 }) =>
   enqueueWrite(() =>
     api.post<AdminReconcileResponse>('/api/admin/reconcile-user', payload, { timeout: 60000 })
+  )
+
+// --- Admin: per-miner fix ---
+export const adminMinerFix = (payload: {
+  address: string
+  timestamp: number
+  signature: string
+  wallet: string
+  id?: number
+  tx_hash?: string
+}) =>
+  enqueueWrite(() =>
+    api.post<AdminMinerFixResponse>('/api/admin/miner-fix', payload, { timeout: 60000 })
+  )
+
+// --- Admin: mining coin edit (set-to) ---
+export const adminMiningEdit = (payload: {
+  address: string
+  timestamp: number
+  signature: string
+  wallet: string
+  set_to: number
+  reason?: string
+}) =>
+  enqueueWrite(() =>
+    api.post<AdminMiningEditResponse>('/api/admin/mining-edit', payload, { timeout: 45000 })
   )
 
 // ---------------- Bootstrap helper (legacy) ----------------
