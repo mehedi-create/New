@@ -12,7 +12,6 @@ import { getStats, upsertUserFromChain, type StatsResponse } from '../services/a
 import { isValidAddress } from '../utils/wallet'
 import NoticeCarousel from '../components/NoticeCarousel'
 
-// Connected components
 import Surface from '../components/common/Surface'
 import BottomNav from '../components/common/BottomNav'
 import BalanceCard from '../components/user/BalanceCard'
@@ -228,12 +227,11 @@ const Dashboard: React.FC = () => {
         <CoinBalanceCard coinBalance={Number(stats?.coin_balance ?? 0)} onInfo={() => setShowCoinInfo(true)} />
       </div>
 
-      {/* Info বাটন এখন MiningCard-এর ভেতরেই আছে; এখানে আলাদা কিছু দরকার নেই */}
+      {/* MiningCard: শুধু History বাটন থাকবে */}
       <div style={styles.cardShell}>
         <MiningCard
           account={account}
           minAmount={5}
-          onInfo={() => setShowCoinInfo(true)}
           onAfterPurchase={async () => {
             queryClient.invalidateQueries({ queryKey: ['onChainData', account] })
             queryClient.invalidateQueries({ queryKey: ['stats-lite', account] })
