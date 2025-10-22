@@ -32,6 +32,7 @@ const styles: Record<string, React.CSSProperties> = {
   btnBuyHover: { transform: 'translateY(-1px)', boxShadow: '0 10px 26px rgba(20,184,166,0.45)' },
   infoText: { textAlign: 'center', marginBottom: 12, fontSize: 13, fontWeight: 700, color: colors.accent },
   hint: { fontSize: 12, color: colors.textMuted, marginTop: 8 },
+  iconRow: { display: 'flex', gap: 8 },
   iconBtn: {
     height: 34, width: 34, borderRadius: '50%',
     background: 'rgba(255,255,255,0.06)', color: colors.text,
@@ -48,9 +49,10 @@ const ERC20_ABI = ['function allowance(address owner, address spender) view retu
 type Props = {
   account: string | null
   minAmount?: number // default 5
-  defaultAmount?: string // default '5.00'
+  defaultAmount?: string // default '100.00'
   onAfterPurchase?: () => Promise<void> | void
   onShowHistory?: () => void
+  onInfo?: () => void
   disabled?: boolean
 }
 
@@ -62,19 +64,28 @@ const InfoIcon = ({ size = 18 }: { size?: number }) => (
   </svg>
 )
 
+const HistoryIcon = ({ size = 18 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M13 3a9 9 0 1 0 9 9h-2a7 7 0 1 1-7-7V3z" fill="currentColor" opacity="0.85"/>
+    <path d="M12 6v6l4 2" stroke="currentColor" strokeWidth="2" fill="none" />
+  </svg>
+)
+
 const MiningCard: React.FC<Props> = ({
   account,
   minAmount = 5,
-  defaultAmount = '5.00',
+  defaultAmount = '100.00',
   onAfterPurchase,
   onShowHistory,
+  onInfo,
   disabled = false,
 }) => {
   const [amount, setAmount] = useState<string>(defaultAmount)
   const [open, setOpen] = useState(false)
   const [msg, setMsg] = useState('')
   const [buyHover, setBuyHover] = useState(false)
-  const [iconHover, setIconHover] = useState(false)
+  const [infoHover, setInfoHover] = useState(false)
+  const [histHover, setHistHover] = useState(false)
 
   const isInvalid = amount !== '' && (isNaN(Number(amount)) || Number(amount) < minAmount)
 
@@ -150,18 +161,32 @@ const MiningCard: React.FC<Props> = ({
               <div className="lxr-lexori-logo" style={{ fontSize: 22, fontWeight: 900, letterSpacing: 1 }}>LEXORI</div>
               <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, color: colors.accent }}>MINING CARD</div>
             </div>
-            {onShowHistory && (
-              <button
-                title="View Miner History"
-                aria-label="View Miner History"
-                style={{ ...styles.iconBtn, ...(iconHover ? styles.iconBtnHover : {}) }}
-                onMouseEnter={() => setIconHover(true)}
-                onMouseLeave={() => setIconHover(false)}
-                onClick={() => onShowHistory()}
-              >
-                <InfoIcon />
-              </button>
-            )}
+            <div style={styles.iconRow}>
+              {onInfo && (
+                <button
+                  title="How mining works"
+                  aria-label="Mining info"
+                  style={{ ...styles.iconBtn, ...(infoHover ? styles.iconBtnHover : {}) }}
+                  onMouseEnter={() => setInfoHover(true)}
+                  onMouseLeave={() => setInfoHover(false)}
+                  onClick={() => onInfo()}
+                >
+                  <InfoIcon />
+                </button>
+              )}
+              {onShowHistory && (
+                <button
+                  title="View Miner History"
+                  aria-label="View Miner History"
+                  style={{ ...styles.iconBtn, ...(histHover ? styles.iconBtnHover : {}) }}
+                  onMouseEnter={() => setHistHover(true)}
+                  onMouseLeave={() => setHistHover(false)}
+                  onClick={() => onShowHistory()}
+                >
+                  <HistoryIcon />
+                </button>
+              )}
+            </div>
           </div>
 
           <div style={styles.infoText}>
