@@ -63,7 +63,7 @@ export async function ensureSchema(db: D1Database) {
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     )`,
 
-    -- manual mining adjustments to reflect edited "Mining Coin"
+    /* manual mining adjustments to reflect edited "Mining Coin" */
     `CREATE TABLE IF NOT EXISTS mining_adjustments (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       wallet_address TEXT NOT NULL,
@@ -76,7 +76,7 @@ export async function ensureSchema(db: D1Database) {
 
   await db.batch(stmts.map((sql) => db.prepare(sql)))
 
-  // Safe migrations for older DBs (ignore errors)
+  // Safe migrations for older DBs (ignore errors if already applied)
   try { await db.prepare(`ALTER TABLE users ADD COLUMN coin_balance INTEGER DEFAULT 0`).run() } catch {}
   try { await db.prepare(`ALTER TABLE notices ADD COLUMN kind TEXT DEFAULT 'text'`).run() } catch {}
   try { await db.prepare(`ALTER TABLE notices ADD COLUMN expires_at TEXT`).run() } catch {}
