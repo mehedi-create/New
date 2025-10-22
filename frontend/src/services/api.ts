@@ -28,6 +28,7 @@ export type StatsResponse = {
     today_date: string
     next_reset_utc_ms: number
   }
+  // New: DB-based referrals count (L1) — UI shows as "Total Refer"
   referrals?: {
     l1_count: number
   }
