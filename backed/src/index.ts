@@ -102,6 +102,8 @@ async function ensureSchema(db: D1Database) {
       admin TEXT NOT NULL,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     )`,
+    // New index to make referral count fast
+    `CREATE INDEX IF NOT EXISTS idx_users_referrer_id ON users(referrer_id)`
   ]
   await db.batch(stmts.map((sql) => db.prepare(sql)))
 
@@ -579,6 +581,13 @@ app.get('/api/stats/:address', async (c) => {
     const loginRow = await c.env.DB.prepare('SELECT COUNT(*) AS cnt FROM logins WHERE wallet_address = ?').bind(lower).first<{ cnt: number }>()
     const totalLoginDays = loginRow?.cnt || 0
 
+    const uid = String(user.user_id || '').toUpperCase()
+    let l1Count = 0
+    if (uid) {
+      const refCnt = await c.env.DB.prepare('SELECT COUNT(*) AS cnt FROM users WHERE referrer_id = ?').bind(uid).first<{ cnt: number }>()
+      l1Count = Number(refCnt?.cnt || 0)
+    }
+
     const today = todayISODate()
     const todayRow = await c.env.DB.prepare('SELECT 1 AS ok FROM logins WHERE wallet_address = ? AND login_date = ?').bind(lower, today).first<{ ok: number }>()
     const todayClaimed = !!todayRow?.ok
@@ -586,7 +595,14 @@ app.get('/api/stats/:address', async (c) => {
     return c.json({
       userId: user.user_id,
       coin_balance: user.coin_balance || 0,
-      logins: { total_login_days: totalLoginDays, today_claimed: todayClaimed, today_date: today, next_reset_utc_ms: Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate() + 1, 0, 0, 0, 0) },
+      logins: {
+        total_login_days: totalLoginDays,
+        today_claimed: todayClaimed,
+        today_date: today,
+        next_reset_utc_ms: Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate() + 1, 0, 0, 0, 0)
+      },
+      // New: DB-based referral count (L1). UI-তে "Total Refer" হিসেবে দেখাতে পারেন।
+      referrals: { l1_count: l1Count }
     })
   } catch (e: any) {
     console.error('GET /api/stats/:address error:', e.stack || e.message)
