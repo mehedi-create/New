@@ -1,0 +1,23 @@
+{
+  "name": "referral-backend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "d1:execute": "wrangler d1 execute referral_db --command",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "ethers": "^6.13.0",
+    "hono": "^4.6.7"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4",
+    "wrangler": "^3.81.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
