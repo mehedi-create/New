@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import Surface from '../common/Surface'
 import {
@@ -8,12 +8,14 @@ import {
   adminMinerRemove,
   adminMinerFix,
   adminMiningEdit,
+  adjustUserCoins,
   type AdminUserInfo,
   type MiningHistoryItem,
 } from '../../services/api'
 import { getUserBalance } from '../../utils/contract'
 import { showErrorToast, showSuccessToast } from '../../utils/notification'
 import { isValidAddress } from '../../utils/wallet'
+import useMedia from '../../utils/useMedia'
 
 // Theme
 const colors = {
@@ -24,75 +26,12 @@ const colors = {
   danger: '#ef4444',
 }
 
-const styles: Record<string, React.CSSProperties> = {
-  overlay: {
-    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)',
-    display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 12,
-  },
-  panel: { maxWidth: 950, width: '100%' },
-  closeBtn: {
-    height: 32, width: 32, borderRadius: 8, cursor: 'pointer',
-    background: 'rgba(255,255,255,0.06)', color: colors.text, border: `1px solid ${colors.grayLine}`,
-    display: 'grid', placeItems: 'center',
-  },
-  sectionTitle: { fontWeight: 900, marginBottom: 6 },
-  small: { fontSize: 12, color: colors.textMuted },
-
-  infoRow: { display: 'grid', gridTemplateColumns: '160px 1fr', gap: 8, alignItems: 'center' },
-  infoKey: { fontWeight: 800, color: colors.textMuted },
-  infoVal: { fontWeight: 900 },
-
-  gridCards: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginTop: 8, marginBottom: 8 },
-  statCard: { padding: 10 },
-  statLabel: { fontSize: 12, color: colors.textMuted, marginBottom: 4, fontWeight: 800 },
-  statValue: { fontSize: 20, fontWeight: 900 },
-
-  miningHeaderRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 10, marginBottom: 6 },
-  addBtn: {
-    height: 36, borderRadius: 8,
-    background: `linear-gradient(45deg, ${colors.accent}, #e0f5ed)`,
-    color: '#0b1b3b', border: 'none', fontSize: 13, fontWeight: 900, cursor: 'pointer', padding: '0 12px',
-  },
-
-  tableWrap: { overflowX: 'auto' },
-  table: { width: '100%', borderCollapse: 'collapse' as const, color: colors.text },
-  th: { textAlign: 'left' as const, padding: '8px 10px', borderBottom: `1px solid ${colors.grayLine}`, fontSize: 12, color: colors.textMuted },
-  td: { padding: '8px 10px', borderBottom: `1px solid ${colors.grayLine}`, fontSize: 13 },
-
-  iconBtn: {
-    height: 32, width: 32, borderRadius: 8,
-    background: 'rgba(255,255,255,0.06)', color: colors.text,
-    border: `1px solid ${colors.grayLine}`, display: 'grid', placeItems: 'center',
-    cursor: 'pointer', transition: 'box-shadow .15s ease, transform .15s ease',
-  },
-  iconBtnDanger: {
-    height: 32, width: 32, borderRadius: 8,
-    background: 'rgba(185,28,28,0.15)', color: '#fff',
-    border: '1px solid rgba(185,28,28,0.5)',
-    display: 'grid', placeItems: 'center', cursor: 'pointer',
-  },
-  iconBtnHover: { boxShadow: '0 0 0 4px rgba(20,184,166,0.25)', transform: 'translateY(-1px)' },
-
-  miningCoinRow: { display: 'flex', alignItems: 'center', gap: 8 },
-  miningEditInput: {
-    height: 36, borderRadius: 8, border: `2px solid ${colors.grayLine}`,
-    background: 'rgba(255,255,255,0.05)', color: colors.text, padding: '0 10px', width: 120, outline: 'none',
-  },
-  miningSaveBtn: {
-    height: 36, borderRadius: 8, border: 'none',
-    background: `linear-gradient(45deg, ${colors.accent}, #e0f5ed)`, color: '#0b1b3b',
-    fontWeight: 900, padding: '0 10px', cursor: 'pointer',
-  },
-
-  addModalOverlay: {
-    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(2px)',
-    display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, padding: 12,
-  },
-  addModalCard: { maxWidth: 560, width: '100%' },
-  input: {
-    height: 40, borderRadius: 10, border: '2px solid rgba(20,184,166,0.3)',
-    padding: '0 10px', background: 'rgba(255,255,255,0.05)', outline: 'none', color: colors.text, fontSize: 14, width: '100%',
-  },
+type Props = {
+  open: boolean
+  onClose: () => void
+  adminAddress: string
+  allow: boolean
+  initialUser?: AdminUserInfo['user'] | null
 }
 
 // Icons
@@ -112,7 +51,7 @@ const PlusIcon = ({ size = 16 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M11 11V5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/></svg>
 )
 
-// Admin-sign helper
+// Admin-sign helper (submit এর সময়ই লাগবে)
 async function signAdminAction(
   purpose: 'user_info' | 'adjust_coins' | 'miner_add' | 'miner_remove' | 'miner_fix' | 'mining_edit',
   adminAddress: string
@@ -136,15 +75,100 @@ const safeMoney = (v?: string | number) => {
 }
 const isValidTxHash = (s: string) => /^0x([A-Fa-f0-9]{64})$/.test(s || '')
 
-type Props = {
-  open: boolean
-  onClose: () => void
-  adminAddress: string
-  allow: boolean
-  initialUser?: AdminUserInfo['user'] | null
-}
-
 const UserDetailModal: React.FC<Props> = ({ open, onClose, adminAddress, allow, initialUser }) => {
+  const isXs = useMedia('(max-width: 420px)')
+  const isSm = useMedia('(max-width: 640px)')
+
+  // Dynamic sizes
+  const fontSm = isXs ? 11 : 12
+  const fontBase = isXs ? 12 : 13
+  const fontBig = isXs ? 16 : 20
+  const pad = isXs ? 6 : 10
+  const iconSize = isXs ? 26 : 32
+  const tablePad = isXs ? 6 : 8
+
+  // Styles (responsive)
+  const styles = {
+    overlay: {
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: isXs ? 8 : 12,
+    },
+    panel: { maxWidth: isSm ? '96vw' : 950, width: '100%' },
+    closeBtn: {
+      height: iconSize, width: iconSize, borderRadius: 8, cursor: 'pointer',
+      background: 'rgba(255,255,255,0.06)', color: colors.text, border: `1px solid ${colors.grayLine}`,
+      display: 'grid', placeItems: 'center', fontSize: isXs ? 14 : 16,
+    },
+    sectionTitle: { fontWeight: 900, marginBottom: 6, fontSize: isXs ? 14 : 16 },
+    small: { fontSize: fontSm, color: colors.textMuted },
+
+    infoRow: {
+      display: 'grid',
+      gridTemplateColumns: isXs ? '1fr' : '160px 1fr',
+      gap: 6,
+      alignItems: 'center',
+    } as React.CSSProperties,
+    infoKey: { fontWeight: 800, color: colors.textMuted, fontSize: fontSm },
+    infoVal: { fontWeight: 900, fontSize: isXs ? 14 : 16 },
+
+    headerTop: {
+      display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8,
+      gap: 8, flexWrap: 'wrap' as const,
+    },
+    headerId: { fontWeight: 900, display: 'flex', flexDirection: 'column' as const, gap: 2, fontSize: isXs ? 13 : 14 },
+    walletLine: {
+      fontWeight: 700, color: colors.textMuted, maxWidth: isSm ? '72vw' : 'unset',
+      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const,
+    },
+
+    addBtn: {
+      height: isXs ? 32 : 36, borderRadius: 8,
+      background: `linear-gradient(45deg, ${colors.accent}, #e0f5ed)`,
+      color: '#0b1b3b', border: 'none', fontSize: isXs ? 12 : 13, fontWeight: 900, cursor: 'pointer', padding: '0 10px',
+      display: 'inline-flex', alignItems: 'center', gap: 6,
+    },
+
+    tableWrap: { overflowX: 'auto' as const },
+    table: { width: '100%', borderCollapse: 'collapse' as const, color: colors.text, fontSize: fontBase },
+    th: { textAlign: 'left' as const, padding: `${tablePad}px 10px`, borderBottom: `1px solid ${colors.grayLine}`, fontSize: fontSm, color: colors.textMuted, whiteSpace: 'nowrap' as const },
+    td: { padding: `${tablePad}px 10px`, borderBottom: `1px solid ${colors.grayLine}`, fontSize: fontBase, whiteSpace: 'nowrap' as const },
+
+    iconBtn: {
+      height: iconSize, width: iconSize, borderRadius: 8,
+      background: 'rgba(255,255,255,0.06)', color: colors.text,
+      border: `1px solid ${colors.grayLine}`, display: 'grid', placeItems: 'center',
+      cursor: 'pointer',
+    },
+    iconBtnDanger: {
+      height: iconSize, width: iconSize, borderRadius: 8,
+      background: 'rgba(185,28,28,0.15)', color: '#fff',
+      border: '1px solid rgba(185,28,28,0.5)', display: 'grid', placeItems: 'center', cursor: 'pointer',
+    },
+
+    editRow: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' as const },
+    editInput: {
+      height: isXs ? 32 : 36, borderRadius: 8, border: `2px solid ${colors.grayLine}`,
+      background: 'rgba(255,255,255,0.05)', color: colors.text, padding: '0 10px',
+      width: isXs ? 120 : 160, outline: 'none', fontSize: fontBase,
+    },
+    saveBtn: {
+      height: isXs ? 32 : 36, borderRadius: 8, border: 'none',
+      background: `linear-gradient(45deg, ${colors.accent}, #e0f5ed)`, color: '#0b1b3b',
+      fontWeight: 900, padding: '0 10px', cursor: 'pointer', fontSize: isXs ? 12 : 13,
+      display: 'inline-flex', alignItems: 'center', gap: 6,
+    },
+
+    addModalOverlay: {
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(2px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, padding: isXs ? 8 : 12,
+    },
+    addModalCard: { maxWidth: isSm ? '94vw' : 560, width: '100%' },
+    input: {
+      height: isXs ? 36 : 40, borderRadius: 10, border: '2px solid rgba(20,184,166,0.3)',
+      padding: '0 10px', background: 'rgba(255,255,255,0.05)', outline: 'none', color: colors.text, fontSize: fontBase, width: '100%',
+    },
+  }
+
   const [user, setUser] = useState<AdminUserInfo['user'] | null>(initialUser || null)
 
   const wallet = user?.wallet_address
@@ -158,14 +182,16 @@ const UserDetailModal: React.FC<Props> = ({ open, onClose, adminAddress, allow, 
     queryFn: async () => (wallet ? await getUserBalance(wallet) : '0'),
   })
 
-  // Mining Coin edit state
+  // Mining Coin edit
   const currentMiningTotal = (user?.mining?.mined_coins || 0) + (user?.mining?.adjustments || 0)
   const [editingMining, setEditingMining] = useState(false)
   const [miningTarget, setMiningTarget] = useState<string>(() => String(currentMiningTotal || 0))
+  useEffect(() => { setMiningTarget(String(currentMiningTotal || 0)) }, [currentMiningTotal])
 
-  useEffect(() => {
-    setMiningTarget(String(currentMiningTotal || 0))
-  }, [currentMiningTotal])
+  // Coin Balance edit
+  const [editingCoin, setEditingCoin] = useState(false)
+  const [coinTarget, setCoinTarget] = useState<string>(() => String(user?.coin_balance ?? 0))
+  useEffect(() => { setCoinTarget(String(user?.coin_balance ?? 0)) }, [user?.coin_balance])
 
   // Miners
   const [miners, setMiners] = useState<MiningHistoryItem[]>([])
@@ -177,24 +203,27 @@ const UserDetailModal: React.FC<Props> = ({ open, onClose, adminAddress, allow, 
     try {
       const res = await getMiningHistory(wallet)
       setMiners(res.data.items || [])
-    } catch {
-      setMiners([])
-    } finally {
-      setLoadingMiners(false)
-    }
+    } catch { setMiners([]) } finally { setLoadingMiners(false) }
   }
 
-  // Refresh user from DB (background)
   const refreshUser = async () => {
     if (!adminAddress || !(wallet || uid)) return
     try {
-      const { timestamp, signature } = await signAdminAction('user_info', adminAddress)
-      const payload: any = { address: adminAddress, timestamp, signature }
+      const { ethers, BrowserProvider } = await import('ethers')
+      const provider = new BrowserProvider((window as any).ethereum)
+      const signer = await provider.getSigner()
+      const ts = Math.floor(Date.now() / 1000)
+      const message = `Admin action authorization
+Purpose: user_info
+Address: ${ethers.getAddress(adminAddress)}
+Timestamp: ${ts}`
+      const signature = await signer.signMessage(message)
+      const payload: any = { address: adminAddress, timestamp: ts, signature }
       if (wallet && isValidAddress(wallet)) payload.wallet = wallet
       else if (uid) payload.user_id = uid
       const res = await getAdminUserInfo(payload)
       if (res.data?.ok && res.data?.user) setUser(res.data.user)
-    } catch (e) { /* silent */ }
+    } catch {}
   }
 
   useEffect(() => {
@@ -205,80 +234,58 @@ const UserDetailModal: React.FC<Props> = ({ open, onClose, adminAddress, allow, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, initialUser?.wallet_address, initialUser?.user_id])
 
-  // Mining Coin save
+  // Save Mining Coin
   const onSaveMiningEdit = async () => {
     if (!user) return
     const target = Number(miningTarget)
     if (!Number.isFinite(target)) { showErrorToast('Enter a valid number'); return }
     try {
       const { timestamp, signature } = await signAdminAction('mining_edit', adminAddress)
-      const res = await adminMiningEdit({
-        address: adminAddress,
-        timestamp, signature,
-        wallet: user.wallet_address,
-        set_to: Math.floor(target),
-        reason: 'mining_correction',
-      })
+      const res = await adminMiningEdit({ address: adminAddress, timestamp, signature, wallet: user.wallet_address, set_to: Math.floor(target), reason: 'mining_correction' })
       const d = res.data
-      if (d?.ok) {
-        showSuccessToast(`Mining coin set → ${d.new_total} (Δ ${d.delta >= 0 ? '+' : ''}${d.delta})`)
-        setEditingMining(false)
-        await refreshUser()
-      } else {
-        showErrorToast('Failed to set mining coin')
-      }
-    } catch (e) {
-      showErrorToast(e, 'Failed to set mining coin')
-    }
+      if (d?.ok) { showSuccessToast(`Mining coin set → ${d.new_total} (Δ ${d.delta>=0?'+':''}${d.delta})`); setEditingMining(false); await refreshUser() }
+      else showErrorToast('Failed to set mining coin')
+    } catch (e) { showErrorToast(e, 'Failed to set mining coin') }
   }
 
-  // Per-miner Fix
+  // Save Coin Balance (set-to)
+  const onSaveCoinEdit = async () => {
+    if (!user) return
+    const target = Math.floor(Number(coinTarget))
+    if (!Number.isFinite(target) || target < 0) { showErrorToast('Enter a valid non-negative integer'); return }
+    const current = Number(user.coin_balance || 0)
+    const delta = target - current
+    if (delta === 0) { setEditingCoin(false); return }
+    if (Math.abs(delta) > 100000 && !window.confirm(`Large change Δ ${delta}. Proceed?`)) return
+    try {
+      const { timestamp, signature } = await signAdminAction('adjust_coins', adminAddress)
+      const res = await adjustUserCoins({ address: adminAddress, timestamp, signature, wallet: user.wallet_address, delta: Math.trunc(delta), reason: `coin_set_to:${target}` })
+      if (res.data?.ok) { showSuccessToast(`Coin balance set → ${target} (Δ ${delta>=0?'+':''}${delta})`); setEditingCoin(false); await refreshUser() }
+      else showErrorToast('Failed to set coin balance')
+    } catch (e) { showErrorToast(e, 'Failed to set coin balance') }
+  }
+
+  // Per-miner Fix / Delete
   const onFixMiner = async (m: MiningHistoryItem) => {
     if (!user) return
     try {
       const { timestamp, signature } = await signAdminAction('miner_fix', adminAddress)
-      const res = await adminMinerFix({
-        address: adminAddress,
-        timestamp, signature,
-        wallet: user.wallet_address,
-        id: m.id,
-      })
+      const res = await adminMinerFix({ address: adminAddress, timestamp, signature, wallet: user.wallet_address, id: m.id })
       const d = res.data
-      if (d?.ok) {
-        showSuccessToast(`Miner fixed • daily=${d.miner.daily_coins} • credited +${d.credited_now}`)
-        await fetchMiners()
-        await refreshUser()
-      } else {
-        showErrorToast('Miner fix failed')
-      }
-    } catch (e) {
-      showErrorToast(e, 'Miner fix failed')
-    }
+      if (d?.ok) { showSuccessToast(`Miner fixed • daily=${d.miner.daily_coins} • credited +${d.credited_now}`); await fetchMiners(); await refreshUser() }
+      else showErrorToast('Miner fix failed')
+    } catch (e) { showErrorToast(e, 'Miner fix failed') }
   }
-
-  // Per-miner Delete
   const onDeleteMiner = async (m: MiningHistoryItem) => {
     if (!user) return
     if (!window.confirm(`Delete miner #${m.id}? Already-credited coins will be deducted.`)) return
     try {
       const { timestamp, signature } = await signAdminAction('miner_remove', adminAddress)
-      const res = await adminMinerRemove({
-        address: adminAddress,
-        timestamp, signature,
-        wallet: user.wallet_address,
-        id: m.id,
-      })
+      const res = await adminMinerRemove({ address: adminAddress, timestamp, signature, wallet: user.wallet_address, id: m.id })
       const d = res.data
-      if (d?.ok) {
-        showSuccessToast(`Miner removed • deducted ${d.deducted} coins`)
-        await fetchMiners()
-        await refreshUser()
-      } else {
-        showErrorToast('Failed to remove miner')
-      }
-    } catch (e) {
-      showErrorToast(e, 'Failed to remove miner')
-    }
+      if (d?.ok) { showSuccessToast(`Miner removed • deducted ${d.deducted} coins`); await fetchMiners(); await refreshUser() }
+      else showErrorToast('Failed to remove miner')
+    } catch (e) { showErrorToast(e, 'Failed to remove miner') }
   }
 
   // Add Miner modal state
@@ -295,28 +302,16 @@ const UserDetailModal: React.FC<Props> = ({ open, onClose, adminAddress, allow, 
     try {
       const { timestamp, signature } = await signAdminAction('miner_add', adminAddress)
       const res = await adminMinerAdd({
-        address: adminAddress,
-        timestamp, signature,
-        wallet: user.wallet_address,
-        mode,
-        tx_hash: mode === 'verify' ? txHash : undefined,
-        amount_usd: mode === 'force' ? Math.floor(Number(amountUsd || '0')) : undefined,
-        start_date: mode === 'force' ? (startDate || undefined) : undefined,
-        total_days: Number(totalDays || '30'),
+        address: adminAddress, timestamp, signature, wallet: user.wallet_address,
+        mode, tx_hash: mode==='verify'?txHash:undefined,
+        amount_usd: mode==='force'?Math.floor(Number(amountUsd||'0')):undefined,
+        start_date: mode==='force'?(startDate||undefined):undefined,
+        total_days: Number(totalDays||'30'),
       })
       const d = res.data as any
-      if (d?.ok) {
-        showSuccessToast(`Miner added • daily=${d.daily_coins} • credited ${d.credited_now} (${d.mode})`)
-        setShowAdd(false)
-        setTxHash(''); setAmountUsd(''); setStartDate(''); setTotalDays('30'); setMode('verify')
-        await fetchMiners()
-        await refreshUser()
-      } else {
-        showErrorToast(d?.error || 'Add miner failed')
-      }
-    } catch (e) {
-      showErrorToast(e, 'Add miner failed')
-    }
+      if (d?.ok) { showSuccessToast(`Miner added • daily=${d.daily_coins} • credited ${d.credited_now} (${d.mode})`); setShowAdd(false); setTxHash(''); setAmountUsd(''); setStartDate(''); setTotalDays('30'); setMode('verify'); await fetchMiners(); await refreshUser() }
+      else showErrorToast(d?.error || 'Add miner failed')
+    } catch (e) { showErrorToast(e, 'Add miner failed') }
   }
 
   if (!open) return null
@@ -328,28 +323,51 @@ const UserDetailModal: React.FC<Props> = ({ open, onClose, adminAddress, allow, 
         <div className="lxr-surface-mesh" />
         <div className="lxr-surface-circuit" />
         <div className="lxr-surface-holo" />
-        <div style={{ position: 'relative', zIndex: 2, padding: 10 }}>
+        <div style={{ position: 'relative', zIndex: 2, padding: pad }}>
           {/* Top bar */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-            <div style={{ fontWeight: 900, display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <div style={styles.headerTop}>
+            <div style={styles.headerId}>
               <span>User ID: {user?.user_id || '-'}</span>
-              <span style={{ fontWeight: 700, color: colors.textMuted }}>
+              <span style={styles.walletLine} title={user?.wallet_address || ''}>
                 Wallet: {user?.wallet_address || '-'}
               </span>
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
               <button style={styles.addBtn} onClick={() => setShowAdd(true)}>
-                <PlusIcon />&nbsp;Add Miner
+                <PlusIcon /> <span>Add Miner</span>
               </button>
               <button style={styles.closeBtn} onClick={onClose} aria-label="Close">✕</button>
             </div>
           </div>
 
-          {/* Summary list (vertical order as requested) */}
+          {/* Summary (mobile-first) */}
           <Surface>
             <div style={{ display: 'grid', gap: 6 }}>
               <div style={styles.infoRow}><div style={styles.infoKey}>Wallet Balance</div><div style={styles.infoVal}>${safeMoney(usdtBalance)} {isFetchingOnChain && <span style={styles.small}>updating</span>}</div></div>
-              <div style={styles.infoRow}><div style={styles.infoKey}>Coin Balance</div><div style={styles.infoVal}>{user?.coin_balance ?? 0}</div></div>
+
+              {/* Coin Balance with inline edit */}
+              <div style={styles.infoRow}>
+                <div style={styles.infoKey}>Coin Balance</div>
+                <div>
+                  {!editingCoin ? (
+                    <div style={styles.editRow}>
+                      <div style={{ fontWeight: 900, fontSize: fontBig }}>{user?.coin_balance ?? 0}</div>
+                      <button title="Edit coin balance" aria-label="Edit coin balance" style={styles.iconBtn} onClick={() => setEditingCoin(true)}>
+                        <PencilIcon size={isXs?16:18} />
+                      </button>
+                    </div>
+                  ) : (
+                    <div style={styles.editRow}>
+                      <input style={styles.editInput} value={coinTarget} onChange={(e) => setCoinTarget(e.target.value.replace(/[^\d]/g, ''))} placeholder="Set coin to" />
+                      <button style={styles.saveBtn} onClick={onSaveCoinEdit}>
+                        <CheckIcon size={isXs?14:18} /> <span>Save</span>
+                      </button>
+                      <button style={styles.closeBtn} onClick={() => { setEditingCoin(false); setCoinTarget(String(user?.coin_balance ?? 0)) }}>✕</button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
               <div style={styles.infoRow}><div style={styles.infoKey}>Total Login</div><div style={styles.infoVal}>{user?.logins ?? 0} day</div></div>
               <div style={styles.infoRow}><div style={styles.infoKey}>Referral Coin</div><div style={styles.infoVal}>{user?.referral_coins ?? 0}</div></div>
               <div style={styles.infoRow}><div style={styles.infoKey}>Total Refer</div><div style={styles.infoVal}>{user?.l1_count ?? 0}</div></div>
@@ -359,27 +377,17 @@ const UserDetailModal: React.FC<Props> = ({ open, onClose, adminAddress, allow, 
                 <div style={styles.infoKey}>Mining Coin</div>
                 <div>
                   {!editingMining ? (
-                    <div style={styles.miningCoinRow}>
-                      <div style={{ ...styles.infoVal }}>{currentMiningTotal}</div>
-                      <button
-                        title="Edit mining coin"
-                        aria-label="Edit mining coin"
-                        style={styles.iconBtn}
-                        onClick={() => setEditingMining(true)}
-                      >
-                        <PencilIcon />
+                    <div style={styles.editRow}>
+                      <div style={{ fontWeight: 900, fontSize: fontBig }}>{currentMiningTotal}</div>
+                      <button title="Edit mining coin" aria-label="Edit mining coin" style={styles.iconBtn} onClick={() => setEditingMining(true)}>
+                        <PencilIcon size={isXs?16:18} />
                       </button>
                     </div>
                   ) : (
-                    <div style={styles.miningCoinRow}>
-                      <input
-                        style={styles.miningEditInput}
-                        value={miningTarget}
-                        onChange={(e) => setMiningTarget(e.target.value.replace(/[^\d-]/g, ''))}
-                        placeholder="Set to"
-                      />
-                      <button style={styles.miningSaveBtn} onClick={onSaveMiningEdit}>
-                        <CheckIcon /> &nbsp;Save
+                    <div style={styles.editRow}>
+                      <input style={styles.editInput} value={miningTarget} onChange={(e) => setMiningTarget(e.target.value.replace(/[^\d-]/g, ''))} placeholder="Set mining to" />
+                      <button style={styles.saveBtn} onClick={onSaveMiningEdit}>
+                        <CheckIcon size={isXs?14:18} /> <span>Save</span>
                       </button>
                       <button style={styles.closeBtn} onClick={() => { setEditingMining(false); setMiningTarget(String(currentMiningTotal || 0)) }}>✕</button>
                     </div>
@@ -389,9 +397,9 @@ const UserDetailModal: React.FC<Props> = ({ open, onClose, adminAddress, allow, 
             </div>
           </Surface>
 
-          {/* Miners list */}
-          <div style={styles.miningHeaderRow}>
-            <div style={{ fontWeight: 900 }}>Miners</div>
+          {/* Miners */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 10, marginBottom: 6 }}>
+            <div style={{ fontWeight: 900, fontSize: isXs ? 14 : 16 }}>Miners</div>
             <div />
           </div>
 
@@ -425,7 +433,7 @@ const UserDetailModal: React.FC<Props> = ({ open, onClose, adminAddress, allow, 
                             rel="noopener noreferrer"
                             style={{ color: colors.accent, textDecoration: 'underline' }}
                           >
-                            {m.tx_hash.slice(0, 10)}...{m.tx_hash.slice(-8)}
+                            {m.tx_hash.slice(0, 6)}...{m.tx_hash.slice(-6)}
                           </a>
                         ) : <span style={{ color: colors.textMuted }}>N/A</span>}
                       </td>
@@ -433,21 +441,11 @@ const UserDetailModal: React.FC<Props> = ({ open, onClose, adminAddress, allow, 
                       <td style={styles.td}>{m.daily_coins * m.credited_days}</td>
                       <td style={{ ...styles.td, textAlign: 'right' }}>
                         <div style={{ display: 'inline-flex', gap: 6 }}>
-                          <button
-                            title="Fix this miner"
-                            aria-label="Fix miner"
-                            style={styles.iconBtn}
-                            onClick={() => onFixMiner(m)}
-                          >
-                            <FixIcon />
+                          <button title="Fix this miner" aria-label="Fix miner" style={styles.iconBtn} onClick={() => onFixMiner(m)}>
+                            <FixIcon size={isXs?16:18} />
                           </button>
-                          <button
-                            title="Delete this miner"
-                            aria-label="Delete miner"
-                            style={styles.iconBtnDanger}
-                            onClick={() => onDeleteMiner(m)}
-                          >
-                            <TrashIcon />
+                          <button title="Delete this miner" aria-label="Delete miner" style={styles.iconBtnDanger} onClick={() => onDeleteMiner(m)}>
+                            <TrashIcon size={isXs?16:18} />
                           </button>
                         </div>
                       </td>
@@ -472,21 +470,21 @@ const UserDetailModal: React.FC<Props> = ({ open, onClose, adminAddress, allow, 
             <div className="lxr-surface-mesh" />
             <div className="lxr-surface-circuit" />
             <div className="lxr-surface-holo" />
-            <div style={{ position: 'relative', zIndex: 2, padding: 10 }}>
+            <div style={{ position: 'relative', zIndex: 2, padding: pad }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                <div style={{ fontWeight: 900 }}>Add Miner</div>
+                <div style={{ fontWeight: 900, fontSize: isXs ? 14 : 16 }}>Add Miner</div>
                 <button style={styles.closeBtn} onClick={() => setShowAdd(false)} aria-label="Close">✕</button>
               </div>
 
-              <div style={{ display: 'flex', gap: 10, marginBottom: 8 }}>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
                 <button
-                  style={{ ...styles.addBtn, ...(mode === 'verify' ? {} : { opacity: 0.6 }) }}
+                  style={{ ...styles.saveBtn, ...(mode === 'verify' ? {} : { opacity: 0.6 }) }}
                   onClick={() => setMode('verify')}
                 >
                   Verify
                 </button>
                 <button
-                  style={{ ...styles.addBtn, background: 'linear-gradient(45deg,#64748b,#cbd5e1)', color: '#0b1b3b', ...(mode === 'force' ? {} : { opacity: 0.6 }) }}
+                  style={{ ...styles.saveBtn, background: 'linear-gradient(45deg,#64748b,#cbd5e1)', color: '#0b1b3b', ...(mode === 'force' ? {} : { opacity: 0.6 }) }}
                   onClick={() => setMode('force')}
                 >
                   Force
@@ -495,46 +493,22 @@ const UserDetailModal: React.FC<Props> = ({ open, onClose, adminAddress, allow, 
 
               {mode === 'verify' ? (
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 8 }}>
-                  <input
-                    style={styles.input}
-                    placeholder="Tx hash (0x...)"
-                    value={txHash}
-                    onChange={(e) => setTxHash(e.target.value.trim())}
-                  />
-                  <button className="lxr-buy-btn" disabled={addingDisabled} onClick={onAddMiner}>
-                    Add (Verify)
-                  </button>
+                  <input style={styles.input} placeholder="Tx hash (0x...)" value={txHash} onChange={(e) => setTxHash(e.target.value.trim())} />
+                  <button className="lxr-buy-btn" disabled={addingDisabled} onClick={onAddMiner}>Add (Verify)</button>
                 </div>
               ) : (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
-                  <input
-                    style={styles.input}
-                    placeholder="Amount (USD)"
-                    value={amountUsd}
-                    onChange={(e) => setAmountUsd(e.target.value.replace(/[^\d]/g, ''))}
-                  />
-                  <input
-                    style={styles.input}
-                    placeholder="Start date (YYYY-MM-DD)"
-                    value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
-                  />
-                  <input
-                    style={styles.input}
-                    placeholder="Total days (default 30)"
-                    value={totalDays}
-                    onChange={(e) => setTotalDays(e.target.value.replace(/[^\d]/g, ''))}
-                  />
-                  <div style={{ gridColumn: '1 / -1' }}>
-                    <button className="lxr-buy-btn" disabled={addingDisabled} onClick={onAddMiner}>
-                      Add (Force)
-                    </button>
+                <div style={{ display: 'grid', gridTemplateColumns: isSm ? '1fr' : '1fr 1fr 1fr', gap: 8 }}>
+                  <input style={styles.input} placeholder="Amount (USD)" value={amountUsd} onChange={(e) => setAmountUsd(e.target.value.replace(/[^\d]/g, ''))} />
+                  <input style={styles.input} placeholder="Start date (YYYY-MM-DD)" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+                  <input style={styles.input} placeholder="Total days (default 30)" value={totalDays} onChange={(e) => setTotalDays(e.target.value.replace(/[^\d]/g, ''))} />
+                  <div style={{ gridColumn: isSm ? '1 / -1' : '1 / -1' }}>
+                    <button className="lxr-buy-btn" disabled={addingDisabled} onClick={onAddMiner}>Add (Force)</button>
                   </div>
                 </div>
               )}
 
-              <div style={{ marginTop: 8, ...styles.small }}>
-                Verify mode requires a valid on-chain tx hash and checks user match/amount. Force mode skips checks.
+              <div style={{ marginTop: 8, fontSize: fontSm, color: colors.textMuted }}>
+                Verify mode checks the on-chain tx and user match. Force mode skips checks (use with care).
               </div>
             </div>
           </div>
