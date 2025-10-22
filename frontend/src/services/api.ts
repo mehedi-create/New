@@ -28,6 +28,9 @@ export type StatsResponse = {
     today_date: string
     next_reset_utc_ms: number
   }
+  referrals?: {
+    l1_count: number
+  }
 }
 
 export type LoginResponse = {
