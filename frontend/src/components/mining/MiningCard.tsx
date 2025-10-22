@@ -16,7 +16,8 @@ const colors = {
 
 const styles: Record<string, React.CSSProperties> = {
   cardShell: { background: 'transparent', border: 'none', padding: 0 },
-  panel: { display: 'flex', gap: 10, alignItems: 'flex-end' },
+  contentWrap: { position: 'relative', zIndex: 2, padding: '14px 12px 16px' },
+  panel: { display: 'flex', gap: 10, alignItems: 'center' },
   input: {
     height: 44, borderRadius: 12, border: '2px solid rgba(20,184,166,0.3)',
     padding: '0 12px', background: 'rgba(255,255,255,0.06)', outline: 'none', color: colors.text, fontSize: 15, width: '100%',
@@ -30,7 +31,7 @@ const styles: Record<string, React.CSSProperties> = {
     transition: 'transform .15s ease, box-shadow .15s ease, opacity .2s ease',
   },
   btnBuyHover: { transform: 'translateY(-1px)', boxShadow: '0 10px 26px rgba(20,184,166,0.45)' },
-  infoText: { textAlign: 'center', marginBottom: 12, fontSize: 13, fontWeight: 700, color: colors.accent },
+  infoText: { textAlign: 'center', margin: '8px 0 16px', fontSize: 13, fontWeight: 700, color: colors.accent },
   hint: { fontSize: 12, color: colors.textMuted, marginTop: 8 },
   iconRow: { display: 'flex', gap: 8 },
   iconBtn: {
@@ -52,17 +53,8 @@ type Props = {
   defaultAmount?: string // default '100.00'
   onAfterPurchase?: () => Promise<void> | void
   onShowHistory?: () => void
-  onInfo?: () => void
   disabled?: boolean
 }
-
-const InfoIcon = ({ size = 18 }: { size?: number }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
-    <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeWidth="2" />
-    <line x1="12" y1="10" x2="12" y2="16" stroke="currentColor" strokeWidth="2" />
-    <circle cx="12" cy="7" r="1.6" fill="currentColor" />
-  </svg>
-)
 
 const HistoryIcon = ({ size = 18 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
@@ -77,14 +69,12 @@ const MiningCard: React.FC<Props> = ({
   defaultAmount = '100.00',
   onAfterPurchase,
   onShowHistory,
-  onInfo,
   disabled = false,
 }) => {
   const [amount, setAmount] = useState<string>(defaultAmount)
   const [open, setOpen] = useState(false)
   const [msg, setMsg] = useState('')
   const [buyHover, setBuyHover] = useState(false)
-  const [infoHover, setInfoHover] = useState(false)
   const [histHover, setHistHover] = useState(false)
 
   const isInvalid = amount !== '' && (isNaN(Number(amount)) || Number(amount) < minAmount)
@@ -155,45 +145,37 @@ const MiningCard: React.FC<Props> = ({
         <div className="lxr-crypto-mesh" />
         <div className="lxr-circuit" />
         <div className="lxr-holo" />
-        <div style={{ position: 'relative', zIndex: 2 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+
+        <div style={styles.contentWrap}>
+          {/* Header */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
             <div>
               <div className="lxr-lexori-logo" style={{ fontSize: 22, fontWeight: 900, letterSpacing: 1 }}>LEXORI</div>
               <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, color: colors.accent }}>MINING CARD</div>
             </div>
-            <div style={styles.iconRow}>
-              {onInfo && (
-                <button
-                  title="How mining works"
-                  aria-label="Mining info"
-                  style={{ ...styles.iconBtn, ...(infoHover ? styles.iconBtnHover : {}) }}
-                  onMouseEnter={() => setInfoHover(true)}
-                  onMouseLeave={() => setInfoHover(false)}
-                  onClick={() => onInfo()}
-                >
-                  <InfoIcon />
-                </button>
-              )}
-              {onShowHistory && (
-                <button
-                  title="View Miner History"
-                  aria-label="View Miner History"
-                  style={{ ...styles.iconBtn, ...(histHover ? styles.iconBtnHover : {}) }}
-                  onMouseEnter={() => setHistHover(true)}
-                  onMouseLeave={() => setHistHover(false)}
-                  onClick={() => onShowHistory()}
-                >
-                  <HistoryIcon />
-                </button>
-              )}
-            </div>
+
+            {/* Only History button */}
+            {onShowHistory && (
+              <button
+                title="View Miner History"
+                aria-label="View Miner History"
+                style={{ ...styles.iconBtn, ...(histHover ? styles.iconBtnHover : {}) }}
+                onMouseEnter={() => setHistHover(true)}
+                onMouseLeave={() => setHistHover(false)}
+                onClick={() => onShowHistory()}
+              >
+                <HistoryIcon />
+              </button>
+            )}
           </div>
 
+          {/* Info text */}
           <div style={styles.infoText}>
             Earn coins daily equal to your invested USDT, for 30 days.
             <br />Example: invest ${minAmount} USDT → {minAmount} coins/day × 30 days.
           </div>
 
+          {/* Form */}
           <div className="lxr-panel">
             <div style={styles.panel}>
               <div style={{ flex: 1 }}>
