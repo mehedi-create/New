@@ -94,7 +94,6 @@ export type UpdateNoticePayload = Partial<Omit<CreateNoticePayload, 'kind'>> & {
 }
 
 // Mining history (backend DB)
-// FIX: include id to match backend response used in AdminDashboard
 export type MiningHistoryItem = {
   id: number
   tx_hash: string
@@ -142,6 +141,20 @@ export type RegisterLiteResponse = {
   ok: boolean
   user: { address: string; userId: string; referrerId: string }
   referral_bonus?: { awarded: boolean; referrer: string }
+}
+
+// --- Admin: reconcile user (auto-fix only selected user) ---
+export type AdminReconcileResponse = {
+  ok: boolean
+  wallet: string
+  ensured?: boolean
+  added_miners?: number
+  corrected_daily?: number
+  credited_now?: number
+  prev_balance?: number
+  expected_balance?: number
+  new_balance?: number
+  error?: string
 }
 
 // ---------------- Health ----------------
@@ -293,6 +306,19 @@ export const adminMinerRemove = (payload: {
 }) =>
   enqueueWrite(() =>
     api.post<AdminMinerRemoveResponse>('/api/admin/miner-remove', payload, { timeout: 45000 })
+  )
+
+// --- Admin: reconcile user (auto-fix only selected user) ---
+export const adminReconcileUser = (payload: {
+  address: string
+  timestamp: number
+  signature: string
+  user_id?: string
+  wallet?: string
+  lookback_days?: number
+}) =>
+  enqueueWrite(() =>
+    api.post<AdminReconcileResponse>('/api/admin/reconcile-user', payload, { timeout: 60000 })
   )
 
 // ---------------- Bootstrap helper (legacy) ----------------
